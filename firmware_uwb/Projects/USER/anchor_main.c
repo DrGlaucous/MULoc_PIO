@@ -26,7 +26,7 @@
 
 #include <math.h>
 
-#ifdef TX_NODE
+//#ifdef TX_NODE
 
 extern void usb_run(void);
 extern int usb_init(void);
@@ -50,6 +50,8 @@ extern uint16 rfDelaysTREK[2];
 static uint8_t current_tx;
 static uint8_t offset;
 
+//only used by the anchors, is the header that preprends all anchor packets
+//The 'E' here is reused as the anchor identifier
 static uint8_t msg_common[] = {0x41, 0x88, 0, 0xCA, 0xDE, 'W', 'A', 'V', 'E', 0x21};
 
 /* Payload format (CIR and receiving timestamps of messages from other anchors)
@@ -57,8 +59,15 @@ static uint8_t msg_common[] = {0x41, 0x88, 0, 0xCA, 0xDE, 'W', 'A', 'V', 'E', 0x
 |---CIR(4 byte)---|--RxTime(5 byte)--|******|---CIR(4 byte)---|--RxTime(5 byte)--|--TxTime(5 byte)--|-IDX(1 byte)-|
 |---------------------------13 byte * (Anchor Number-1)--------------------------|--------------6 byte------------| 
 */
+
+//13 bytes total
+//[2 bytes ][2 bytes][1 byte          ][1 byte               ][2 bytes       ][5 bytes]
+//[CIR real][CIR img][phase correction][preamble accumulation][max growth cir][rx time]
+
+//this is written to, but not really read from. I don't exactly know what it's ...for?
 static uint8_t msg_payload[(ANCHOR_NUM - 1) * SINGLE_LEN + END_LEN + 4];
 
+//header + main payload
 static uint8_t sending_msg[sizeof(msg_common) + sizeof(msg_payload)];
 
 /* Frame sequence number, incremented after each transmission. */
@@ -68,8 +77,10 @@ static uint8_t frame_seq_nb = 0;
 static uint64_t rx_ts;
 static uint64_t tx_ts;
 
+//Channel Impulse Response = CIR
 static uint8_t cir_buffer[4 * CIR_LEN + 1];
 
+//will alternate between 1 and 3
 static uint16_t current_freq = 1;
 
 // Anchor 0 start error number
@@ -101,7 +112,11 @@ void dw_init(void)
 		};
 	}
 
+	//trim the crystal frequency (not done by the tag, only the anchors)
+	//for the DW3000, look at: XTAL_TRIM, page 165 and page 243 of the dw3000 user manual
 	dwt_xtaltrim(16);
+
+	//load in one-time-programmable settings
 	dwt_loadopsettabfromotp(DWT_OPSET_TIGHT);
 
 	// Config the SPI speed to 18 MHz
@@ -110,6 +125,7 @@ void dw_init(void)
 	// Config the RF parameters
 	dwt_configure(&config);
 
+	//not supported by the DW3000. See page 10. Boosts power for short packets
 	dwt_setsmarttxpower(1);
 	dwt_configuretxrf(&txconfig2);
 
@@ -126,8 +142,10 @@ void dw_init(void)
 	dwt_setrxantennadelay(RX_ANT_DLY);
 	dwt_settxantennadelay(TX_ANT_DLY);
 
+	//enable IRQs
 	dwt_setinterrupt(DWT_INT_RFCG | (DWT_INT_ARFE | DWT_INT_RFSL | DWT_INT_SFDT | DWT_INT_RPHE | DWT_INT_RFCE | DWT_INT_RFTO /*| DWT_INT_RXPTO*/), 1);
 
+	//set up source address.
 	msg_f_send.sourceAddr[0] = 1 & 0xFF;
 	msg_f_send.sourceAddr[1] = (1 >> 8) & 0xFF;
 }
@@ -140,8 +158,9 @@ int dw_main(void)
 	// Initialization
 	dw_init();
 
-	// The index of anchor that is currently sending message
+	// The index of the anchor that is currently sending a message
 	uint8_t current_idx = 0;
+
 	// True or False
 	uint8_t is_last_anchor = 0;
 	uint8_t ret = 0;
@@ -154,12 +173,15 @@ int dw_main(void)
 
 	led_on(LED_PC9);
 
+	//anchor 0 will send a starting message to kickstart the process
 	if (0 == ANCHOR_ID)
 	{
 
+		//set to send mode
 		anchor_state = ANCHOR_SEND;
 
 		sending_msg[ALL_MSG_SN_IDX] = frame_seq_nb;
+
 		dwt_writetxdata(sizeof(sending_msg), sending_msg, 0);
 		dwt_writetxfctrl(sizeof(sending_msg), 0);
 
@@ -169,6 +191,7 @@ int dw_main(void)
 		dwt_setpreambledetecttimeout(0);
 
 		// Start the ranging session from anchor 0
+		//send message and await responses
 		dwt_starttx(DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
 	}
 
@@ -179,24 +202,30 @@ int dw_main(void)
 		// If the anchor is in the listening state
 		if (ANCHOR_LISTEN == anchor_state)
 		{
-
+			//zero this timeout (called multiple times, always zero)
 			dwt_setpreambledetecttimeout(0);
 			/* Clear reception timeout to start next ranging process. */
+
+			//set rx timeout
 			dwt_setrxtimeout(RX_TIMEOUT);
+
 			/* Activate reception immediately. */
+			//go into rx mode
 			dwt_rxenable(DWT_START_RX_IMMEDIATE);
 		}
 
 		// Waiting for reception completion
+		//wait for incoming msg
 		while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_ERR)))
 		{};
 
-		// If the anchor have received the message, then change it to listening state
+		// If the anchor has received the message, then change it to listening state
 		if (anchor_state == ANCHOR_SEND)
 		{
 			anchor_state = ANCHOR_LISTEN;
 		}
 
+		//successful packet reception
 		if (status_reg & SYS_STATUS_RXFCG)
 		{
 
@@ -206,20 +235,25 @@ int dw_main(void)
 			// Read the frame length from DW register
 			frame_len = dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
 
+			//clear status
 			dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG | SYS_STATUS_TXFRS);
 
+			//read in data
 			if (frame_len <= FRAME_LEN_MAX)
 			{
 				// Read data from RX buffer
 				dwt_readrxdata(rx_buffer, frame_len, 0);
 			}
 
+			//get which anchor sent this
 			current_tx = rx_buffer[8];
 			frame_seq_nb = rx_buffer[ALL_MSG_SN_IDX];
 
+			//time of arrival
 			rx_ts = get_rx_timestamp_u64();
 
 			// Copy the receiving timestamps into buffer
+			//split by the current anchor ID
 			if (current_tx < ANCHOR_ID)
 			{
 				offset = SINGLE_LEN * current_tx + POA_LEN + 4;
@@ -229,9 +263,10 @@ int dw_main(void)
 				// UWB anchors cannot receive the messages sent by themself
 				offset = SINGLE_LEN * (current_tx - 1) + POA_LEN + 4;
 			}
+			//put TOA into payload at correct location
 			final_msg_set_ts(&msg_payload[offset], rx_ts);
 
-			// It's our turn to send a message. We should send later if we are anchor 0 and it's time for hooping
+			// It's our turn to send a message. We should send later if we are anchor 0 and it's time for hopping
 			if (((current_tx + 1) % ANCHOR_NUM == ANCHOR_ID) && !((0 == ANCHOR_ID) && (frame_seq_nb % 2 == 1)))
 			{
 				// Time delay between the messages from different anchors
@@ -266,6 +301,7 @@ int dw_main(void)
 				// Enable rx RX_AFTER_TX_DELAY after the transmission
 				dwt_setrxaftertxdelay(RX_AFTER_TX_DELAY);
 
+				//frequency hop
 				if ((ANCHOR_ID + 1 == ANCHOR_NUM) && (frame_seq_nb % 2 == 1))
 				{
 					// If we are the last anchor and should perform hopping, we should not start reception before hopping.
@@ -284,24 +320,39 @@ int dw_main(void)
 				}
 			}
 
+			//I think this just collects the last register, RX_TTCK0 high (rcphase)
+			//which is weird, because in the tag firmware, we just read that register directly into a byte instead of reading all five
 			uint8 temp[5];
 			dwt_readfromdevice(RX_TTCKO_ID, 0, RX_TTCKO_LEN, temp);
-
 			phase_cal = temp[4];
+
+			// Read max growth cir and rxPC for RSSI estimation
+			//for the DW3000, found using dwt_readdiagnostics under ipatovF1-6 (?)			
 			maxGC = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x6);
+
+			//read rxpacc from RX_FINFO - Preamble Accumulation Count, see page 97 of the DW1000 manual
+			//it is in the high 3 nibbles of the RX_FINFO register. We only keep the lower 2 nibbles in rxPC
 			rxPC = (dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXPACC_MASK) >> RX_FINFO_RXPACC_SHIFT;
 
-			// Read the first path CIR and save it to local buffer
+			// Read the first path CIR and save it to local buffer (for the tag, this happens above collecting the maxGC and rxPC values)
+			//for the DW3000, this can be gotten from dwt_readdiagnostics and ipatovPeak
 			uint16 fp_index = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
-			dwt_readaccdata(cir_buffer, CIR_LEN * 4 + 1, (fp_index) * 4);
 
-			// Copy CIR to msg_payload
+			//use that to read accumulator data (page 228 of the DW3000 manual, even though this is the DW1000. I want to port this stuff to the DW3000)
+			dwt_readaccdata(cir_buffer,
+				CIR_LEN * 4 + 1, //13 bytes. Why is this 13 bytes?
+				(fp_index) * 4 //offset it to where the CIR is kept (not sure why the *4 though)
+			);
+
+			// Copy CIR to msg_payload (skipping our anchor)
 			if (current_tx < ANCHOR_ID)
 			{
+				//anchors less than ours
 				memcpy(msg_payload + SINGLE_LEN * current_tx, cir_buffer + 1 + 4, 4);
 			}
 			else
 			{
+				//anchors greater than ours
 				memcpy(msg_payload + SINGLE_LEN * (current_tx - 1), cir_buffer + 1 + 4, 4);
 			}
 
@@ -315,7 +366,7 @@ int dw_main(void)
 				msg_payload[SINGLE_LEN * (current_tx - 1) + 4] = phase_cal;
 			}
 
-			// Copy rxPC to msg_payload
+			// Copy rxPC to msg_payload <Preamble Accumulation Count>
 			if (current_tx < ANCHOR_ID)
 			{
 				msg_payload[SINGLE_LEN * current_tx + 5] = (uint8_t)rxPC;
@@ -325,7 +376,7 @@ int dw_main(void)
 				msg_payload[SINGLE_LEN * (current_tx - 1) + 5] = (uint8_t)rxPC;
 			}
 
-			// Copy maxGC to msg_payload
+			// Copy maxGC to msg_payload <max growth cir>
 			if (current_tx < ANCHOR_ID)
 			{
 				msg_payload[SINGLE_LEN * current_tx + 6] = (uint8_t)(maxGC >> 8);
@@ -337,8 +388,15 @@ int dw_main(void)
 				msg_payload[SINGLE_LEN * (current_tx - 1) + 7] = (uint8_t)maxGC;
 			}
 
+
+
+
 			// All messages have been sent
-			if ((current_tx + 1 == ANCHOR_NUM) || ((current_tx + 2 == ANCHOR_NUM) && (ANCHOR_ID + 1 == ANCHOR_NUM) && is_last_anchor))
+			if ((current_tx + 1 == ANCHOR_NUM) //is last anchor
+				|| ((current_tx + 2 == ANCHOR_NUM) //is second-to-last anchor
+				&& (ANCHOR_ID + 1 == ANCHOR_NUM) //AND we're the last anchor
+				&& is_last_anchor //and we're the last...anchor? (what?)
+			))
 			{
 
 				// The last anchor should write buffer after transmission
@@ -351,6 +409,7 @@ int dw_main(void)
 					sending_msg[i] = msg_payload[i - 10];
 				}
 
+				//erase payload
 				memset(msg_payload, 0, (ANCHOR_NUM - 1) * SINGLE_LEN + END_LEN + 4);
 
 				// It's time for hopping
@@ -382,6 +441,7 @@ int dw_main(void)
 						dwt_configuretxrf(&txconfig2);
 					}
 
+					//is last anchor
 					if (ANCHOR_ID + 1 == ANCHOR_NUM)
 					{
 
@@ -389,10 +449,12 @@ int dw_main(void)
 						/* Clear reception timeout to start next ranging process. */
 						dwt_setrxtimeout(RX_TIMEOUT);
 						// If we are the last anchor, we should start receive after hopping
+						//why only the last one?
 						dwt_rxenable(DWT_START_RX_IMMEDIATE);
 						anchor_state = ANCHOR_SEND;
 					}
 
+					//first anchor, kick things off again
 					if (0 == ANCHOR_ID)
 					{
 						// If we are anchor 0, we should start transmission after hopping
@@ -435,7 +497,7 @@ int dw_main(void)
 			if (0 == ANCHOR_ID)
 			{
 
-				// Hooping Now! If received more than ANCHOR_NUM-2 messages.
+				// Hopping Now! If received more than ANCHOR_NUM-2 messages.
 				if (err_num >= 1)
 				{
 					rec_cnt = 0;
@@ -444,15 +506,18 @@ int dw_main(void)
 
 					current_freq = 1;
 
-					dwt_forcetrxoff();
+					dwt_forcetrxoff(); //halt radio
+					//reconfigure for other mode
 					dwt_configure(&config);
 					dwt_configuretxrf(&txconfig2);
 				}
 				else
 				{
+					//delay for 3 milliseconds
 					HalDelay_nMs(3);
 				}
 
+				//clear status
 				dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
 
 				// Restart from anchor 0 if any packet is lost
@@ -473,6 +538,7 @@ int dw_main(void)
 			else
 			{
 				// Hopping Now! If received more than ANCHOR_NUM-2 messages
+				//why isn't this ANCHOR_NUM-2, then?
 				if (err_num >= 1)
 				{
 
@@ -485,10 +551,13 @@ int dw_main(void)
 					dwt_configure(&config);
 					dwt_configuretxrf(&txconfig2);
 				}
+
+				//clear status
 				dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
 			}
 		}
 
+		//pretty sure this is unused
 		if (n > 10)
 		{
 			HalUsbWrite(usbVCOMout, n);
@@ -497,4 +566,4 @@ int dw_main(void)
 	}
 }
 
-#endif
+//#endif

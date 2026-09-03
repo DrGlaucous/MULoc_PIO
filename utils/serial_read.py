@@ -15,6 +15,7 @@ tagSerials = []
 
 MAX_TIME = 90
 
+#Experimental data/handwritten trajectories
 PATH = '../实验数据/手写轨迹/'
 FILE_NAME = 'handwriting_info3'
 

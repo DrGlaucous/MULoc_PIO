@@ -38,16 +38,32 @@
 |---CIR(4 byte)---|--RxTime(5 byte)--|******|---CIR(4 byte)---|--RxTime(5 byte)--|-IDX(1 byte)-|
 |---------------------------13 byte * (Anchor Number-1)--------------------------|----1 byte---| 
 */
+
+//13 bytes total
+//[2 bytes ][2 bytes][1 byte          ][1 byte               ][2 bytes       ][5 bytes]
+//[CIR real][CIR img][phase correction][preamble accumulation][max growth cir][rx time]
+
+//length of a single set of data from an anchor
 #define SINGLE_LEN 13
+
+
 #define POA_LEN 4
 
 #define END_LEN 0
 
 /* Length of the common part of the message (up to and including the function code, see NOTE 2 below). */
+//the prefix header present on all messages (index 8 is used as the anchor id)
+//the header is: msg_common[] = {0x41, 0x88, 0, 0xCA, 0xDE, 'W', 'A', 'V', 'E', 0x21};
 #define ALL_MSG_COMMON_LEN 10
+
 /* Indexes to access some of the fields in the frames defined above. */
+
+//all message sequence index (where the frame is in the TWR sequence)
 #define ALL_MSG_SN_IDX 2
+
 #define SENDING_TX_TS_IDX 10
+
+
 
 /* Delay between frames, in UWB microseconds. */
 #define DELAY_TIME 600
@@ -55,7 +71,8 @@
 #define RX_AFTER_TX_DELAY 450
 #define RX_TIMEOUT 2500
 
-/* Length of CIR read from the accumulator buffer*/
+/* Length of channel impulse response to read from the accumulator buffer*/
+//each complex/real value is 3 bytes long (6 for the whole number). Maybe that's why it's like this?
 #define CIR_LEN 3
 
 #define NET_PANID 0xF0F2
