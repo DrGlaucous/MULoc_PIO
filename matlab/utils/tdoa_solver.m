@@ -1,3 +1,6 @@
+%time difference of arrival,
+%given distances to each anchor, figure out where the final object is in 3D space(?)
+
 function [loc_result] = tdoa_solver(tdoa,anc_loc,method,taylor_iter,noise)
 % tdoa_solver  Solver for TDoA-based localization
 %

@@ -1,6 +1,8 @@
+%takes in the tag and anchor object arrays and the indices of the anchors we want to select
+
 function DD = phase_recover(tag,ancs,anc_1,anc_2,anc_ref,cfo,delta_anc,fc,anc_loc,idx)
 % phase_recover - Perform UWB signal recovery for phase estimates
-% 
+%
 % Input Parameters:
 %   tag:         UWB tag
 %   ancs:        UWB anchors
@@ -8,16 +10,18 @@ function DD = phase_recover(tag,ancs,anc_1,anc_2,anc_ref,cfo,delta_anc,fc,anc_lo
 %   anc_2:       The index of the second anchor
 %   ref:         The index of the reference anchor.
 %   cfo:         Clock drift
-%   delta_anc:   The time interval between two consecutive UWB packets. 
+%   delta_anc:   The time interval between two consecutive UWB packets.
 %   anc_loc:     The locations of all UWB anchors in the coordinate system.
 %   anc_loc:     The carrier frequency of UWB signal.
 %   idx:         The sample index of the estimates from channel 1 or channel 3.
-% 
+%
 % Output Parameters:
 %   DD:          The Recovered phase estimates
 
-c = physconst('LightSpeed');
+%c = physconst('LightSpeed');
+c = 299792458
 
+%phase offset angles between tag and reference
 phase1 = tag.poa(anc_1,idx);
 phase2 = ancs(anc_ref).poa(anc_1,idx+1);
 
