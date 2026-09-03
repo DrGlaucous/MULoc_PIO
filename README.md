@@ -1,3 +1,17 @@
+
+# MULoc - A very smartly implemented UWB tracker thingy
+
+
+## What is this fork?
+
+This fork is my attempt at understanding and replicating the results found in the original MULoc paper and source code, as well as implement it with DW3000 modules instead of the DW1000 ones used in the paper.
+
+My devboard of choice is the DWM3001, which contains an embedded NRF52833 module I can use with platformIO to leverage the high-level abstractions, c++ environment, and Arduino libraries.
+
+The rest of this readme is unchanged.
+
+---
+
 # MULoc: Towards Millimeter-Accurate Localization for Unlimited UWB Tags via Anchor Overhearing
 
 *Junqi Ma, Fusang Zhang, Beihong Jin, Siheng Li, and Zhi Wang*
