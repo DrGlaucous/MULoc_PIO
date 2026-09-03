@@ -1,6 +1,24 @@
 #pragma once
 
 
+///////////////////code-specific defines
+
+//needs to be changed for each anchor to do proper scheduling
+#define ANCHOR_ID 0
+
+//max anchor count
+#define ANCHOR_NUM 4
+
+//we need to calibrate the board in order to get these
+#define RX_ANT_DELAY 16385
+#define TX_ANT_DELAY 16385
+
+#define RX_TIMEOUT 2500
+
+
+
+
+///////////////////DWM3001CDK-specific defines
 
 //the pins on the NRF chip are scrambled because the arduino backend expects this chip to be on a different devboard,
 //I'll put the fixed mapping(s) here
@@ -50,8 +68,6 @@
 // #define DW3000_CLK_Pin      ARDUINO_13_PIN  // DWM3000 shield SPIM1 sck connected to DW1000 ->3
 // #define DW3000_MOSI_Pin     ARDUINO_11_PIN  // DWM3000 shield SPIM1 mosi connected to DW1000 ->8
 // #define DW3000_MISO_Pin     ARDUINO_12_PIN  // DWM3000 shield SPIM1 miso connected to DW1000 ->29
-
-
 
 
 

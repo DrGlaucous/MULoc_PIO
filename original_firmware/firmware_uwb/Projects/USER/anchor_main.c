@@ -159,10 +159,13 @@ int dw_main(void)
 	dw_init();
 
 	// The index of the anchor that is currently sending a message
+	//not used anywhere
 	uint8_t current_idx = 0;
 
 	// True or False
 	uint8_t is_last_anchor = 0;
+
+	//don't think this one is used either (it's assigned, but never read)
 	uint8_t ret = 0;
 
 	// Write the common segments of UWB message into tx buffer

@@ -24,6 +24,12 @@ typedef enum RangingFrameNum {
 } RangingFrameNum;
 
 
+typedef enum AnchorState {
+    Listening = 0,
+    Sending = 1,
+} AnchorState;
+
+
 class PacketHelpers {
     public:
 
