@@ -166,12 +166,22 @@ class AnchorInfoPacket {
         uint16_t max_growth_cir,
         uint64_t rx_time
     ) {
-        PacketHelpers::num_to_byte_array(cir_real, payload + CIR_REAL_ID, 2);
-        PacketHelpers::num_to_byte_array(cir_real, payload + CIR_IMAGINARY_ID, 2);
-        payload[PHASE_CORRECTION_ID] = phase_correction;
-        payload[PREAMBLE_ACCUMULATION_ID] = preamble_accumulation;
-        PacketHelpers::num_to_byte_array(max_growth_cir, payload + MAX_GROWTH_CIR_ID, 2);
-        PacketHelpers::num_to_byte_array(rx_time, payload + RX_TIME_ID, 5);
+        
+        set_cir_real(cir_real);
+        set_cir_imaginary(cir_imaginary);
+        set_phase_correction(phase_correction);
+        set_preamble_accumulation(preamble_accumulation);
+        set_max_growth_cir(max_growth_cir);
+        set_rx_time(rx_time);
+
+
+        //these are wrapped in the methods above
+        //PacketHelpers::num_to_byte_array(cir_real, payload + CIR_REAL_ID, 2);
+        //PacketHelpers::num_to_byte_array(cir_imaginary, payload + CIR_IMAGINARY_ID, 2);
+        //payload[PHASE_CORRECTION_ID] = phase_correction;
+        //payload[PREAMBLE_ACCUMULATION_ID] = preamble_accumulation;
+        //PacketHelpers::num_to_byte_array(max_growth_cir, payload + MAX_GROWTH_CIR_ID, 2);
+        //PacketHelpers::num_to_byte_array(rx_time, payload + RX_TIME_ID, 5);
     }
 
     //from raw data
@@ -208,6 +218,26 @@ class AnchorInfoPacket {
         return PacketHelpers::byte_array_to_num(payload + RX_TIME_ID, 5);
     }
 
+    //set components
+    void set_cir_real(uint16_t cir_real) {
+         PacketHelpers::num_to_byte_array(cir_real, payload + CIR_REAL_ID, 2);
+    }
+    void set_cir_imaginary(uint16_t cir_imaginary) {
+        PacketHelpers::num_to_byte_array(cir_imaginary, payload + CIR_IMAGINARY_ID, 2);
+    }
+    void set_phase_correction(uint8_t phase_correction) {
+        payload[PHASE_CORRECTION_ID] = phase_correction;
+    }
+    void set_preamble_accumulation(uint8_t preamble_accumulation) {
+        payload[PREAMBLE_ACCUMULATION_ID] = preamble_accumulation;
+    }
+    void set_max_growth_cir(uint16_t max_growth_cir) {
+        PacketHelpers::num_to_byte_array(max_growth_cir, payload + MAX_GROWTH_CIR_ID, 2);
+    }
+    void set_rx_time(uint64_t rx_time) {
+        PacketHelpers::num_to_byte_array(rx_time, payload + RX_TIME_ID, 5);
+    }
+
 
 
 
@@ -237,7 +267,7 @@ class TokenRingPacket {
 
     }
 
-    //construct from raw
+    //construct from raw bytes, length is constant, so we assume it is correct
     TokenRingPacket(const uint8_t* compiled) {
         memcpy(this->payload, compiled, TOTAL_LENGTH);
     }
@@ -276,6 +306,30 @@ class TokenRingPacket {
 
     }
 
+    //set one of the bundled packets inside this one
+    //returns true if the set operation was successful
+    bool set_packet_at(const AnchorInfoPacket& packet, uint8_t index) {
+
+        //out of range, or matches the anchor this packet was transmitted from (because that's not included)
+        if(index == get_index() || index >= ANCHOR_NUM) {
+            return false;
+        }
+
+        //offset down by 1 since we skip our index
+        if(index > get_index()) {
+            index -= 1;
+        }
+
+        //copy the raw anchor info bytes into the payload buffer
+        //offset forward to info packet section and skip ahead by (index) number of anchor packets
+        memcpy((payload + PAYLOAD_ID) + (index * AnchorInfoPacket::TOTAL_LENGTH),
+            packet.get_compiled(),
+            packet.get_compiled_len()
+        );
+
+        return true;
+    }
+
     //get anchor index this packet was sent from
     uint8_t get_index() {
         return payload[ANCHOR_INDEX_ID];
@@ -291,9 +345,14 @@ class TokenRingPacket {
         return payload;
     }
 
+    //get length of the flight-ready packet
     uint8_t get_compiled_len() const {
         return TOTAL_LENGTH;
     }
+
+    
+
+
 
 };
 

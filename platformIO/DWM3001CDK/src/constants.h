@@ -13,8 +13,15 @@
 #define RX_ANT_DELAY 16385
 #define TX_ANT_DELAY 16385
 
+//time after sending a packet before enabling RX mode
+#define RX_AFTER_TX_DELAY 450
+//how long RX mode will be on before we stop listening
 #define RX_TIMEOUT 2500
 
+//the time in microseconds to process an incoming packet and send it back out
+#define TURNAROUND_TIME_US 600
+//ditto, but add to that the time it takes the radio to chang efrequencies
+#define TURNAROUND_HOP_TIME_US 600
 
 
 

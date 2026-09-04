@@ -269,9 +269,12 @@ int dw_main(void)
 			//put TOA into payload at correct location
 			final_msg_set_ts(&msg_payload[offset], rx_ts);
 
+			//weird that we're sending a message before all the most recent data is collected, but I guess it's probably for a reason...
 			// It's our turn to send a message. We should send later if we are anchor 0 and it's time for hopping
-			if (((current_tx + 1) % ANCHOR_NUM == ANCHOR_ID) && !((0 == ANCHOR_ID) && (frame_seq_nb % 2 == 1)))
-			{
+			if (
+				((current_tx + 1) % ANCHOR_NUM == ANCHOR_ID) //next sender id is ours
+				&& !((0 == ANCHOR_ID) && (frame_seq_nb % 2 == 1)) //we are NOT 0 while the sequence number 
+			) {
 				// Time delay between the messages from different anchors
 				uint32_t delay_time;
 				uint32_t tx_time;
@@ -304,12 +307,12 @@ int dw_main(void)
 				// Enable rx RX_AFTER_TX_DELAY after the transmission
 				dwt_setrxaftertxdelay(RX_AFTER_TX_DELAY);
 
-				//frequency hop
+				//start transmission and determine if we should listen for a response right away or not
 				if ((ANCHOR_ID + 1 == ANCHOR_NUM) && (frame_seq_nb % 2 == 1))
 				{
 					// If we are the last anchor and should perform hopping, we should not start reception before hopping.
 					ret = dwt_starttx(DWT_START_TX_DELAYED);
-					is_last_anchor = 1;
+					is_last_anchor = 1; //redundant
 				}
 				else
 				{
@@ -317,6 +320,7 @@ int dw_main(void)
 					anchor_state = ANCHOR_SEND;
 				}
 
+				//is last anchor, set variable (this variable is redundant)
 				if (ANCHOR_NUM - 1 == ANCHOR_ID)
 				{
 					is_last_anchor = 1;
@@ -395,12 +399,13 @@ int dw_main(void)
 
 
 			// All messages have been sent
-			if ((current_tx + 1 == ANCHOR_NUM) //is last anchor
-				|| ((current_tx + 2 == ANCHOR_NUM) //is second-to-last anchor
+			if ((current_tx + 1 == ANCHOR_NUM) //the packet we got was from the last anchor
+				||
+				((current_tx + 2 == ANCHOR_NUM) //the packet came from the second-to-last anchor
 				&& (ANCHOR_ID + 1 == ANCHOR_NUM) //AND we're the last anchor
-				&& is_last_anchor //and we're the last...anchor? (what?)
-			))
-			{
+				&& is_last_anchor //and we're the last...anchor? (what?) (this is redundant; the condition above covers it too)
+				)
+			) {
 
 				// The last anchor should write buffer after transmission
 				is_last_anchor = 0;

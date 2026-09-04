@@ -196,6 +196,12 @@ void loop_anchor() {
 
     //additional anchor setup
 
+
+	//this packet is saved through multiple RX and TX operations, updated whenever a new packet from another anchor is gotten
+	TokenRingPacket persistent_tr_packet = TokenRingPacket();
+	persistent_tr_packet.set_index(ANCHOR_ID);
+
+
     AnchorState anchor_state = AnchorState::Listening;
     int error_count = 0;
 
@@ -226,10 +232,13 @@ void loop_anchor() {
             outgoing_tr.get_compiled_len()
         );
 
+		//send message and immediately wait for response
+		send_packet(outgoing_main, DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
 
 
 
     }
+
 
     //the "true" mainloop
     while(1) {
@@ -250,14 +259,101 @@ void loop_anchor() {
         }
 
 
+		//if we send the message, we will block here until the next anchor sends a message
         if(wait_for_message_with_timeout(0, true)) {
             //successful RX
 
-            //reset error count
+			//reset radio status
+			radio->clear_system_status();
+
+			//reset error count
             error_count = 0;
 
             //get incoming frame
             auto frame = get_packet();
+
+			//ensure correct packet type (we assume it will always be a tokenRing packet)
+			if(frame.get_packet_type() != PacketType::TokenRing) {
+				continue;
+			}
+
+			//get token ring from other sender
+			TokenRingPacket tr_packet = TokenRingPacket(frame.get_payload());
+
+			//get ID of sender
+			uint8_t sender_id = tr_packet.get_index();
+			uint8_t sequence_no = tr_packet.get_sequence_no();
+
+			//get time of arrival
+			uint64_t rx_time = radio->get_rx_timestamp_u64();
+
+			//update the packet cache with it
+			AnchorInfoPacket latest_info = persistent_tr_packet.get_packet_at(sender_id); //get
+			latest_info.set_rx_time(rx_time); //update
+			persistent_tr_packet.set_packet_at(latest_info, sender_id); //set
+
+			//check and transmit the next message
+			if(
+				(ANCHOR_ID == (sender_id + 1) % ANCHOR_NUM) //next sender is us
+				&& !((ANCHOR_ID == 0) && (sequence_no % 2 == 1)) //we aren't anchor 0 during a frequency hop
+			) {
+				auto turnaround_time = TURNAROUND_TIME_US;
+
+				//completed the loop, increment the sequence number
+				if(ANCHOR_ID == 0) {
+					sequence_no += 1;
+
+					//optional: the original code had this, but it's the same value as the normal turnaround time
+					turnaround_time = TURNAROUND_HOP_TIME_US;
+				}
+
+				//set the outgoing time and give it to the radio
+				uint64_t tx_timestamp = ((turnaround_time * UUS_TO_DWT_TIME + rx_time) >> 8) & 0xFFFFFFFEUL;
+				radio->dwt_setdelayedtrxtime((uint32_t)tx_timestamp);
+				//tx_timestamp = (tx_timestamp << 8) + TX_ANT_DELAY; //only needed if we want to put the tx timestamp in the outgoing packet. We don't really need to do that with this implementation since the turnaround time is fixed
+
+				//package packet up for transmission
+				persistent_tr_packet.set_sequence_no(sequence_no);
+				UWBPacket new_outgoing = UWBPacket(
+					get_uuid(),
+					UWBPacket::BROADCAST_MAC,
+					PacketType::TokenRing,
+					persistent_tr_packet.get_compiled(),
+					persistent_tr_packet.get_compiled_len());
+
+				//set timeout for reception
+				radio->dwt_setrxtimeout(RX_TIMEOUT);
+				radio->dwt_setrxaftertxdelay(RX_AFTER_TX_DELAY);
+
+				//send packet and change state (optionally expecting a response or not)
+				if(
+					(ANCHOR_ID == ANCHOR_NUM - 1) //we are the last anchor
+					&& (sequence_no % 2 == 1) //the sequence number is odd
+				) {
+					//don't expect a response; we will be changing frequencies
+					send_packet(new_outgoing, DWT_START_TX_DELAYED);
+				} else {
+					send_packet(new_outgoing, DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED);
+					anchor_state == AnchorState::Sending;
+				}
+				
+			}
+
+
+			//collect novel ranging data (todo: find DW3000 equivalents to the data from the DW1000)
+
+
+			//get phase of arrival, see page 180. This record is 14 bits long (in the DW1000, it is 7 bits long)
+			uint16_t phase_cal = 0;
+			radio->dwt_readfromdevice(IP_TOA_HI_ID, 1, 2, (uint8_t*)&phase_cal);
+
+			//lots of the values we need are now stored inside this struct
+			//dwt_rxdiag_t diagnostics = {};
+			//radio->dwt_readdiagnostics(&diagnostics);
+			//uint16_t fp_index = diagnostics.ipatovPeak;
+			//radio->dwt_readaccdata()
+
+
 
 
         } else {
