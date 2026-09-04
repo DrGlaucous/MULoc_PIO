@@ -63,6 +63,18 @@ dwt_txconfig_t txconfig_ch9 = {
 
 /////////////////////helper functions
 
+//platform specific code, this will need to be changed for non-NRF devices!
+//MAC address should be hard-coded into each device
+uint64_t get_uuid() {
+
+	//collect both halves of the unique device ID
+	uint64_t lsb = (uint64_t)NRF_FICR->DEVICEID[0];
+	uint64_t msb = (uint64_t)NRF_FICR->DEVICEID[1];
+
+	//merge them together and return them as one chunk
+	return (msb << 32) | lsb;
+}
+
 //prints a u64, since the arduino IDE's serial.print doesn't handle this
 void print_u64(uint64_t value, int base) {
 	Serial.print((uint32_t)(value >> 32), base);
@@ -197,8 +209,25 @@ void loop_anchor() {
 
         
         anchor_state = AnchorState::Sending;
-
+        
         radio->dwt_setrxtimeout(RX_TIMEOUT);
+
+        //construct packet with basic info
+        TokenRingPacket outgoing_tr = TokenRingPacket();
+        outgoing_tr.set_index(ANCHOR_ID);
+        outgoing_tr.set_sequence_no(0);
+
+        //wrap it in a main packet
+        UWBPacket outgoing_main = UWBPacket(
+            get_uuid(),
+            UWBPacket::BROADCAST_MAC,
+            PacketType::TokenRing,
+            outgoing_tr.get_compiled(),
+            outgoing_tr.get_compiled_len()
+        );
+
+
+
 
     }
 

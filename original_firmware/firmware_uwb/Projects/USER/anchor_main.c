@@ -64,7 +64,7 @@ static uint8_t msg_common[] = {0x41, 0x88, 0, 0xCA, 0xDE, 'W', 'A', 'V', 'E', 0x
 //[2 bytes ][2 bytes][1 byte          ][1 byte               ][2 bytes       ][5 bytes]
 //[CIR real][CIR img][phase correction][preamble accumulation][max growth cir][rx time]
 
-//this is written to, but not really read from. I don't exactly know what it's ...for?
+//this is written to and copied to sending_msg. See line 409-ish... where this happens
 static uint8_t msg_payload[(ANCHOR_NUM - 1) * SINGLE_LEN + END_LEN + 4];
 
 //header + main payload
