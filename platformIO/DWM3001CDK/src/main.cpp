@@ -191,6 +191,61 @@ int wait_for_message_with_timeout(uint32_t timeout_ms, bool no_timeout = false) 
 
 ////////////////////main methods
 
+//just blasts packets. How fast can we go?
+void loop_test() {
+
+    auto tick = micros();
+
+    auto outgoing = "Hello";
+    //wrap outgoing_tr_packet in a main packet
+    UWBPacket outgoing_main = UWBPacket(
+        get_uuid(),
+        UWBPacket::BROADCAST_MAC,
+        PacketType::UserDefined,
+        (uint8_t*)outgoing,
+        sizeof(outgoing)
+    );
+
+    auto midpoint = micros();
+
+    //send message and immediately start waiting for response (non-blocking)
+    send_packet(outgoing_main, DWT_START_TX_IMMEDIATE);
+
+    auto first_half = midpoint - tick;
+    auto total = micros() - tick;
+    Serial.print(first_half);
+    Serial.print(" ");
+    Serial.println(total);
+
+    //delay(10);
+
+
+}
+
+
+
+//custom anchor loop
+void loop_a_custom() {
+
+    //we'll just start with a simple token ring
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////re-implementations of the muloc code (there's problems, I'm not getting past the initial transmission)
+
+
 //the mainloop specific to the anchors
 void loop_anchor() {
 
@@ -210,7 +265,6 @@ void loop_anchor() {
 
 
     AnchorState anchor_state = AnchorState::Listening;
-    int error_count = 0;
 
     //clean slate (possibly redundant)
 	radio->clear_system_status();
@@ -226,7 +280,7 @@ void loop_anchor() {
         radio->dwt_setrxtimeout(RX_TIMEOUT);
 
 
-        //wrap it in a main packet
+        //wrap outgoing_tr_packet in a main packet
         UWBPacket outgoing_main = UWBPacket(
             get_uuid(),
             UWBPacket::BROADCAST_MAC,
@@ -235,9 +289,10 @@ void loop_anchor() {
             outgoing_tr_packet.get_compiled_len()
         );
 
-		//send message and immediately wait for response
+		//send message and immediately start waiting for response (non-blocking)
 		send_packet(outgoing_main, DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
 
+        Serial.println("sent");
 
 
     }
@@ -263,14 +318,20 @@ void loop_anchor() {
 
 
 		//if we send the message, we will block here until the next anchor sends a message
-        if(wait_for_message_with_timeout(0, true)) {
+        auto response = 0;
+        while(!response) {
+            radio->check_for_rx();
+        }
+
+
+        if(response == 1) {
+
+            Serial.println("Got");
+
             //successful RX
 
 			//reset radio status
 			radio->clear_system_status();
-
-			//reset error count
-            error_count = 0;
 
             //get incoming frame
             auto frame = get_packet();
@@ -337,7 +398,7 @@ void loop_anchor() {
 					send_packet(new_outgoing, DWT_START_TX_DELAYED);
 				} else {
 					send_packet(new_outgoing, DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED);
-					anchor_state == AnchorState::Sending;
+					anchor_state = AnchorState::Sending;
 				}
 				
 			}
@@ -384,9 +445,9 @@ void loop_anchor() {
                 | cir_buffer[1 + complex_byte_len * 2 + 1] << 8 //mid
                 | cir_buffer[1 + complex_byte_len * 2 + 2] << 16; //hi
             
+            //update this slot with the data we gleaned (re-using since we already defined it above)
             latest_info.set_cir_real(cir_real);
             latest_info.set_cir_imaginary(cir_img);
-
             latest_info.set_phase_correction(phase_cal);
             latest_info.set_preamble_accumulation(rx_pc);
             latest_info.set_max_growth_cir(max_gc);
@@ -423,7 +484,7 @@ void loop_anchor() {
                     //put radio into idle mode
                     radio->dwt_forcetrxoff();
 
-                    //every other time we're in this main if-statement, do a flip (since the main if statement goes every other and this goes every 2 rounds)
+                    //every time we're in this main if-statement, do a flip (since the main if statement goes every other and this goes every 2 rounds)
                     if(sequence_no % 4 == 1) {
                         radio->dwt_configure(&config_ch5);
                         radio->dwt_configuretxrf(&txconfig_ch5);
@@ -486,8 +547,6 @@ void loop_anchor() {
         } else {
             //unsuccessful RX
 
-            //keep track of error count
-            //error_count += 1;
 
             //reset frequency back to 5
             radio->dwt_forcetrxoff();
@@ -526,18 +585,207 @@ void loop_anchor() {
 
 }
 
-
+//the one specific to tags
 void loop_tag() {
 
+    //clean slate (possibly redundant)
+	radio->clear_system_status();
+	radio->dwt_writefastCMD(CMD_TXRXOFF);
+
+
+    //all of this data needs to be dumped over serial, 252 bytes in total
+
+    //stores all the gotten anchor data
+    TokenRingPacket anchor_datas[ANCHOR_NUM] = {};
+
+    //same with these, which are collected as we get each packet
+    uint64_t rx_timestamps[ANCHOR_NUM] = {};
+    uint32_t cir_reals[ANCHOR_NUM] = {};
+    uint32_t cir_imgs[ANCHOR_NUM] = {};
+    int32_t carrier_integrators[ANCHOR_NUM] = {};
+    uint16_t phase_cals[ANCHOR_NUM] = {};
+    uint32_t max_gcs[ANCHOR_NUM] = {};
+    uint16_t rx_pcs[ANCHOR_NUM] = {};
+
+
+
+    //the "true" mainloop
+    while(1) {
+
+
+        radio->dwt_setrxtimeout(RX_TIMEOUT);
+    
+        //start listening
+        radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
+
+        //wait for rx
+        auto response = 0;
+        while(!response) {
+            radio->check_for_rx();
+        }
+
+        if(response == 1) {
+
+            auto frame = get_packet();
+
+            //ensure correct packet type (we assume it will always be a tokenRing packet)
+			if(frame.get_packet_type() != PacketType::TokenRing) {
+				continue;
+			}
+
+			//get token ring from sender
+			TokenRingPacket tr_packet = TokenRingPacket(frame.get_payload());
+
+            uint8_t sequence_no = tr_packet.get_sequence_no();
+            uint8_t sender_id = tr_packet.get_index();
+
+            //stow gotten packet
+            anchor_datas[sender_id] = TokenRingPacket(tr_packet.get_compiled());
+            rx_timestamps[sender_id] = radio->get_rx_timestamp_u64();
+
+            //collect the novel radio data
+
+			//lots of the values we need are now stored inside this struct
+			dwt_rxdiag_t diagnostics = {};
+			radio->dwt_readdiagnostics(&diagnostics);
+
+            //1:1 with the DW1000 version
+            //raw register: IP_DIAG_8.IP_FP
+            uint16_t fp_index = diagnostics.ipatovFpIndex >> 6; //bit shifting removes the fractional part
+
+            //higher resolution than the DW1000 version
+            //raw register: IP_DIAG_12.IP_NACC
+            rx_pcs[sender_id] = diagnostics.ipatovAccumCount;
+            
+            //also read from: IP_DIAG_1, the value is 17 bits long
+            max_gcs[sender_id] = diagnostics.ipatovPower;
+
+            //get phase of arrival, see page 180. This record is 14 bits long (in the DW1000, it is 7 bits long)
+            phase_cals[sender_id] = diagnostics.ipatovPOA;
+
+                        uint8_t complex_byte_len = 6;
+            //extra 1 for the dummy leading byte we get when starting the read
+            uint8_t cir_buffer[complex_byte_len * CIR_LEN + 1] = {};
+            radio->dwt_readaccdata(cir_buffer, (complex_byte_len * CIR_LEN + 1), fp_index * complex_byte_len);
+
+            //the original code took the second entry of three in the CIR buffer
+            cir_reals[sender_id] = cir_buffer[1 + complex_byte_len] //lo
+                | cir_buffer[1 + complex_byte_len + 1] << 8 //mid
+                | cir_buffer[1 + complex_byte_len + 2] << 16; //hi
+            cir_imgs[sender_id] = cir_buffer[1 + complex_byte_len * 2] //lo
+                | cir_buffer[1 + complex_byte_len * 2 + 1] << 8 //mid
+                | cir_buffer[1 + complex_byte_len * 2 + 2] << 16; //hi
+
+            //get the carrier integrator, same as DW1000
+            carrier_integrators[sender_id] = radio->dwt_readcarrierintegrator();
+
+            //last anchor in the list, we got all the packets for this round
+            if(sender_id == ANCHOR_NUM - 1) {
+
+                //iterate through all anchors and dump their data to serial
+                for(int i = 0; i < ANCHOR_NUM; ++i) {
+
+
+                    //for that anchor, iterate through all anchors again
+                    for(int j = 0; j < ANCHOR_NUM; ++j) {
+
+                        //skip the main anchor
+                        if(j == i) {
+                            continue;
+                        }
+
+                        //print all data from the ranging packet from i to j
+                        auto range_to_packet = anchor_datas[i].get_packet_at(j);
+                        Serial.print(range_to_packet.get_cir_real(), HEX);
+                        Serial.print(",");
+                        Serial.print(range_to_packet.get_cir_imaginary(), HEX);
+                        Serial.print(",");
+                        Serial.print(range_to_packet.get_phase_correction(), HEX);
+                        Serial.print(",");
+                        Serial.print(range_to_packet.get_preamble_accumulation(), HEX);
+                        Serial.print(",");
+                        Serial.print(range_to_packet.get_max_growth_cir(), HEX);
+                        Serial.print(",");
+                        print_u64(range_to_packet.get_rx_time(), HEX);
+                        Serial.print(",");
+                        Serial.print(j, HEX);
+                        Serial.print(",");
+
+
+                    }
+                    Serial.print(anchor_datas[i].get_sequence_no());
+                    Serial.print(",");
+                    Serial.println(i, HEX);
+
+
+
+                }
+
+
+                //iterate through novel data and dump it to serial as well
+                for(int i = 0; i < ANCHOR_NUM; ++i) {
+
+                    Serial.print(cir_reals[i], HEX);
+                    Serial.print(",");
+                    Serial.print(cir_imgs[i], HEX);
+                    Serial.print(",");
+                    Serial.print(phase_cals[i], HEX);
+                    Serial.print(",");
+                    Serial.print(rx_pcs[i], HEX);
+                    Serial.print(",");
+                    Serial.print(max_gcs[i], HEX);
+                    Serial.print(",");
+                    print_u64(rx_timestamps[i], HEX);
+                    Serial.print(",");
+                    Serial.print(carrier_integrators[i], HEX);
+                    
+                    Serial.print(",");
+                    Serial.print(anchor_datas[i].get_sequence_no());
+                    Serial.print(",");
+                    Serial.println(i, HEX);
+                }
+
+
+                //flip frequencies
+                if (sequence_no % 2 == 1) {
+
+                    if (sequence_no % 4 == 1) {
+                        radio->dwt_forcetrxoff();
+                        radio->dwt_configure(&config_ch5);
+                        radio->dwt_configuretxrf(&txconfig_ch5);
+
+                    } else if (sequence_no % 4 == 3) {
+
+                        radio->dwt_forcetrxoff();
+                        radio->dwt_configure(&config_ch9);
+                        radio->dwt_configuretxrf(&txconfig_ch9);
+                    }
+
+                }
+
+
+            }
+            
+
+
+        }
+
+
+
+    }
 
 
 }
+
+
+///////////////////////////////////////////////////////wrappers
+
 
 //starts SPI, Serial, and the DW3000
 void setup() {
 	// sets up the device to use the pins on the bottom left of the rPi header for serial communication.
 	Serial = Uart(NRF_UART0, UARTE0_UART0_IRQn, 31, 7);
-	Serial.begin(115200);
+	Serial.begin(BAUD_RATE);
 	Serial.println("Begin");
 
 
@@ -546,7 +794,7 @@ void setup() {
 	SPI.begin();
 
     //set up the backend components and feed them into the main DW3000 class
-	uart = new DWUart(115200);
+	uart = new DWUart(BAUD_RATE);
 	port = new DW3000Port(&SPI, SPI_CS, DW_RST, DW_IRQ);
 	radio = new DW3000(uart, port);
 
@@ -600,7 +848,16 @@ void setup() {
 
 
 void loop() {
-    delay(1000);
+
+    loop_test();
+    return;
+
+#ifdef TAG
+    loop_tag();
+#else
+    loop_anchor();
+#endif
+
 }
 
 

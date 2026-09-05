@@ -3,11 +3,14 @@
 
 ///////////////////code-specific defines
 
+//true if the device is a tag
+//#define TAG
+
 //needs to be changed for each anchor to do proper scheduling
 #define ANCHOR_ID 0
 
 //max anchor count
-#define ANCHOR_NUM 4
+#define ANCHOR_NUM 2
 
 //we need to calibrate the board in order to get these
 #define RX_ANT_DELAY 16385
@@ -26,6 +29,8 @@
 //how much of the channel impulse response to read
 #define CIR_LEN 3
 
+//115200
+#define BAUD_RATE 460800
 
 ///////////////////DWM3001CDK-specific defines
 

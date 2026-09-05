@@ -144,7 +144,7 @@ class AnchorInfoPacket {
     static const uint8_t MAX_GROWTH_CIR_ID = 12;
     static const uint8_t RX_TIME_ID = 16;
 
-    static const uint8_t TOTAL_LENGTH = 19;
+    static const uint8_t TOTAL_LENGTH = 21;
     
     private:
 

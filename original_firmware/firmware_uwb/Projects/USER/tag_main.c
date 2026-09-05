@@ -147,7 +147,7 @@ int dw_main(void)
 	// Initialization
 	dw_init();
 
-	// The index of anchor that is currently sending message
+	// The index of anchor that is currently sending message (unused)
 	uint8_t current_idx = 0;
 
 
@@ -204,7 +204,7 @@ int dw_main(void)
 				msg_buffer +
 				((ANCHOR_NUM - 1) * SINGLE_LEN + END_LEN) * current_tx, //offset forward by whichever anchor this belongs to
 				rx_buffer + ALL_MSG_COMMON_LEN, //skip past the header
-				(ANCHOR_NUM - 1) * SINGLE_LEN //a single slot's worth of data (why does it change with anchor count?)
+				(ANCHOR_NUM - 1) * SINGLE_LEN //all the slot's worth of data (3 * 13)
 				+ END_LEN //actually not sure why this isn't part of the header (even though it's 0).
 			);
 
@@ -217,8 +217,8 @@ int dw_main(void)
 
 			//use that to read accumulator data (page 228 of the DW3000 manual, even though this is the DW1000. I want to port this stuff to the DW3000)
 			dwt_readaccdata(cir_buffer + current_tx * (CIR_LEN * 4 + 1),
-				CIR_LEN * 4 + 1, //13 bytes. Why is this 13 bytes?
-				(fp_index) * 4 //offset it to where the CIR is kept (not sure why the *4 though)
+				CIR_LEN * 4 + 1, //13 bytes. 3 complex numbers + 1 dummy
+				(fp_index) * 4 //offset it to where the CIR is kept (not sure why the *4 though) (probably because each entry is 2+2 bytes long)
 			);
 
 
@@ -247,6 +247,7 @@ int dw_main(void)
 				//this is a weird and hard-to-understand way to copy the data.
 				//why did they do it this way?
 
+				//unused
 				int xx = 0;
 
 				//anchor... uh.... label your acronyms, dude.
