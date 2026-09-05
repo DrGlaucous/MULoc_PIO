@@ -198,8 +198,15 @@ void loop_anchor() {
 
 
 	//this packet is saved through multiple RX and TX operations, updated whenever a new packet from another anchor is gotten
+    //it's reset at the end of each round, and all its 
 	TokenRingPacket persistent_tr_packet = TokenRingPacket();
 	persistent_tr_packet.set_index(ANCHOR_ID);
+
+    //the static outgoing packet that all the values from above are copied into at the end of each sequencing round.
+    //this is what's sent each transaction.
+    TokenRingPacket outgoing_tr_packet = TokenRingPacket();
+    outgoing_tr_packet.set_index(ANCHOR_ID);
+    outgoing_tr_packet.set_sequence_no(0);
 
 
     AnchorState anchor_state = AnchorState::Listening;
@@ -218,18 +225,14 @@ void loop_anchor() {
         
         radio->dwt_setrxtimeout(RX_TIMEOUT);
 
-        //construct packet with basic info
-        TokenRingPacket outgoing_tr = TokenRingPacket();
-        outgoing_tr.set_index(ANCHOR_ID);
-        outgoing_tr.set_sequence_no(0);
 
         //wrap it in a main packet
         UWBPacket outgoing_main = UWBPacket(
             get_uuid(),
             UWBPacket::BROADCAST_MAC,
             PacketType::TokenRing,
-            outgoing_tr.get_compiled(),
-            outgoing_tr.get_compiled_len()
+            outgoing_tr_packet.get_compiled(),
+            outgoing_tr_packet.get_compiled_len()
         );
 
 		//send message and immediately wait for response
@@ -313,13 +316,13 @@ void loop_anchor() {
 				//tx_timestamp = (tx_timestamp << 8) + TX_ANT_DELAY; //only needed if we want to put the tx timestamp in the outgoing packet. We don't really need to do that with this implementation since the turnaround time is fixed
 
 				//package packet up for transmission
-				persistent_tr_packet.set_sequence_no(sequence_no);
+				outgoing_tr_packet.set_sequence_no(sequence_no);
 				UWBPacket new_outgoing = UWBPacket(
 					get_uuid(),
 					UWBPacket::BROADCAST_MAC,
 					PacketType::TokenRing,
-					persistent_tr_packet.get_compiled(),
-					persistent_tr_packet.get_compiled_len());
+					outgoing_tr_packet.get_compiled(),
+					outgoing_tr_packet.get_compiled_len());
 
 				//set timeout for reception
 				radio->dwt_setrxtimeout(RX_TIMEOUT);
@@ -343,21 +346,179 @@ void loop_anchor() {
 			//collect novel ranging data (todo: find DW3000 equivalents to the data from the DW1000)
 
 
-			//get phase of arrival, see page 180. This record is 14 bits long (in the DW1000, it is 7 bits long)
-			uint16_t phase_cal = 0;
-			radio->dwt_readfromdevice(IP_TOA_HI_ID, 1, 2, (uint8_t*)&phase_cal);
-
 			//lots of the values we need are now stored inside this struct
-			//dwt_rxdiag_t diagnostics = {};
-			//radio->dwt_readdiagnostics(&diagnostics);
-			//uint16_t fp_index = diagnostics.ipatovPeak;
-			//radio->dwt_readaccdata()
+			dwt_rxdiag_t diagnostics = {};
+			radio->dwt_readdiagnostics(&diagnostics);
 
+            //1:1 with the DW1000 version
+            //raw register: IP_DIAG_8.IP_FP
+            uint16_t fp_index = diagnostics.ipatovFpIndex >> 6; //bit shifting removes the fractional part
+
+            //higher resolution than the DW1000 version
+            //raw register: IP_DIAG_12.IP_NACC
+            uint16_t rx_pc = diagnostics.ipatovAccumCount;
+            
+            //also read from: IP_DIAG_1, the value is 17 bits long
+            uint32_t max_gc = diagnostics.ipatovPower;
+
+
+			//get phase of arrival, see page 180. This record is 14 bits long (in the DW1000, it is 7 bits long)
+            //it is a signed two's compliment integer, I need to sign-extend it and convert it to radians (divide by 2^11)
+			//uint16_t phase_cal = 0;
+			//radio->dwt_readfromdevice(IP_TOA_HI_ID, 1, 2, (uint8_t*)&phase_cal);
+            uint16_t phase_cal = diagnostics.ipatovPOA; //this is the exact same thing
+
+            uint8_t complex_byte_len = 6;
+            //extra 1 for the dummy leading byte we get when starting the read
+            uint8_t cir_buffer[complex_byte_len * CIR_LEN + 1] = {};
+            radio->dwt_readaccdata(cir_buffer, (complex_byte_len * CIR_LEN + 1), fp_index * complex_byte_len);
+
+            //put the data we collected into our persistent payload
+
+            //the original code took the second entry of three in the CIR buffer
+            uint32_t cir_real = cir_buffer[1 + complex_byte_len] //lo
+                | cir_buffer[1 + complex_byte_len + 1] << 8 //mid
+                | cir_buffer[1 + complex_byte_len + 2] << 16; //hi
+
+            uint32_t cir_img = cir_buffer[1 + complex_byte_len * 2] //lo
+                | cir_buffer[1 + complex_byte_len * 2 + 1] << 8 //mid
+                | cir_buffer[1 + complex_byte_len * 2 + 2] << 16; //hi
+            
+            latest_info.set_cir_real(cir_real);
+            latest_info.set_cir_imaginary(cir_img);
+
+            latest_info.set_phase_correction(phase_cal);
+            latest_info.set_preamble_accumulation(rx_pc);
+            latest_info.set_max_growth_cir(max_gc);
+
+            //store updated settings
+            persistent_tr_packet.set_packet_at(latest_info, sender_id);
+
+
+            //check if all messages have been sent
+            if(
+                (sender_id == ANCHOR_NUM - 1) //is last message
+                || (
+                    (sender_id == ANCHOR_NUM - 2) //or second-to-last message
+                    && (ANCHOR_ID == ANCHOR_NUM - 1) //and we're the last message
+                )
+            ) {
+
+                //move persistent settings into outgoing packet
+                outgoing_tr_packet = TokenRingPacket(persistent_tr_packet.get_compiled());
+
+                //reset token ring packet
+                persistent_tr_packet = TokenRingPacket();
+                persistent_tr_packet.set_index(ANCHOR_ID);
+
+                //check and perform frequency change
+                if(sequence_no % 2 == 1 && anchor_state != AnchorState::Sending) {
+
+                    //last anchor, wait for successful send
+                    //todo: edit send_packet() since this is in there. is it OK to wait on all the other packets?
+                    if(ANCHOR_ID == ANCHOR_NUM - 1) {
+                        while(!radio->check_frame_tx_success()) {}
+                    }
+
+                    //put radio into idle mode
+                    radio->dwt_forcetrxoff();
+
+                    //every other time we're in this main if-statement, do a flip (since the main if statement goes every other and this goes every 2 rounds)
+                    if(sequence_no % 4 == 1) {
+                        radio->dwt_configure(&config_ch5);
+                        radio->dwt_configuretxrf(&txconfig_ch5);
+
+                    } else if(sequence_no % 4 == 3) {
+                        radio->dwt_configure(&config_ch9);
+                        radio->dwt_configuretxrf(&txconfig_ch9);
+                    }
+
+                    //set last anchor to RX mode after sending
+                    if(ANCHOR_ID == ANCHOR_NUM - 1) {
+                        radio->dwt_setpreambledetecttimeout(0);
+                        radio->dwt_setrxtimeout(RX_TIMEOUT);
+                        radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
+                        anchor_state = AnchorState::Sending; //to skip putting it into RX mode when the loop starts over again because we've already set that here
+                    }
+
+                    //first anchor kicks things off again
+                    if(ANCHOR_ID == 0) {
+
+                        //I need to run some experiments to see what the real values for these times are
+                        uint32_t turnaround_time = TURNAROUND_HOP_TIME_US + TURNAROUND_TIME_US;
+
+                        sequence_no += 1;
+
+                        //set the outgoing time and give it to the radio
+                        uint64_t tx_timestamp = ((turnaround_time * UUS_TO_DWT_TIME + rx_time) >> 8) & 0xFFFFFFFEUL;
+                        radio->dwt_setdelayedtrxtime((uint32_t)tx_timestamp);
+
+                        //package packet up for transmission
+                        outgoing_tr_packet.set_sequence_no(sequence_no);
+                        UWBPacket new_outgoing = UWBPacket(
+                            get_uuid(),
+                            UWBPacket::BROADCAST_MAC,
+                            PacketType::TokenRing,
+                            outgoing_tr_packet.get_compiled(),
+                            outgoing_tr_packet.get_compiled_len());
+
+                        //set timeout for reception
+                        radio->dwt_setrxtimeout(RX_TIMEOUT);
+                        radio->dwt_setrxaftertxdelay(RX_AFTER_TX_DELAY);
+                        
+                        send_packet(new_outgoing, DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED);
+                        anchor_state = AnchorState::Sending;
+
+
+
+                    }
+
+
+
+                }
+
+
+
+            }
 
 
 
         } else {
             //unsuccessful RX
+
+            //keep track of error count
+            //error_count += 1;
+
+            //reset frequency back to 5
+            radio->dwt_forcetrxoff();
+            radio->dwt_configure(&config_ch5);
+            radio->dwt_configuretxrf(&txconfig_ch5);
+
+            //clear radio status
+            radio->clear_system_status();
+
+            //restart token ring
+            if(ANCHOR_ID == 0) {
+
+                //reset sequence number and pack up the packet
+                outgoing_tr_packet.set_sequence_no(0);
+                UWBPacket new_outgoing = UWBPacket(
+                    get_uuid(),
+                    UWBPacket::BROADCAST_MAC,
+                    PacketType::TokenRing,
+                    outgoing_tr_packet.get_compiled(),
+                    outgoing_tr_packet.get_compiled_len());
+
+                //set the state
+                anchor_state = AnchorState::Sending;                
+
+                //set timeout for reception
+                radio->dwt_setrxtimeout(RX_TIMEOUT);
+                radio->dwt_setrxaftertxdelay(RX_AFTER_TX_DELAY);
+
+                send_packet(new_outgoing, DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
+                
+            }
 
 
         }

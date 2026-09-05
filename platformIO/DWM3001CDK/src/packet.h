@@ -138,13 +138,13 @@ class AnchorInfoPacket {
     public:
 
     static const uint8_t CIR_REAL_ID = 0;
-    static const uint8_t CIR_IMAGINARY_ID = 2;
-    static const uint8_t PHASE_CORRECTION_ID = 4;
-    static const uint8_t PREAMBLE_ACCUMULATION_ID = 5;
-    static const uint8_t MAX_GROWTH_CIR_ID = 6;
-    static const uint8_t RX_TIME_ID = 8;
+    static const uint8_t CIR_IMAGINARY_ID = 4;
+    static const uint8_t PHASE_CORRECTION_ID = 8;
+    static const uint8_t PREAMBLE_ACCUMULATION_ID = 10;
+    static const uint8_t MAX_GROWTH_CIR_ID = 12;
+    static const uint8_t RX_TIME_ID = 16;
 
-    static const uint8_t TOTAL_LENGTH = 13;
+    static const uint8_t TOTAL_LENGTH = 19;
     
     private:
 
@@ -159,11 +159,11 @@ class AnchorInfoPacket {
 
     //populate packet with components
     AnchorInfoPacket(
-        uint16_t cir_real,
-        uint16_t cir_imaginary,
-        uint8_t phase_correction,
-        uint8_t preamble_accumulation,
-        uint16_t max_growth_cir,
+        uint32_t cir_real,
+        uint32_t cir_imaginary,
+        uint16_t phase_correction,
+        uint16_t preamble_accumulation,
+        uint32_t max_growth_cir,
         uint64_t rx_time
     ) {
         
@@ -173,15 +173,6 @@ class AnchorInfoPacket {
         set_preamble_accumulation(preamble_accumulation);
         set_max_growth_cir(max_growth_cir);
         set_rx_time(rx_time);
-
-
-        //these are wrapped in the methods above
-        //PacketHelpers::num_to_byte_array(cir_real, payload + CIR_REAL_ID, 2);
-        //PacketHelpers::num_to_byte_array(cir_imaginary, payload + CIR_IMAGINARY_ID, 2);
-        //payload[PHASE_CORRECTION_ID] = phase_correction;
-        //payload[PREAMBLE_ACCUMULATION_ID] = preamble_accumulation;
-        //PacketHelpers::num_to_byte_array(max_growth_cir, payload + MAX_GROWTH_CIR_ID, 2);
-        //PacketHelpers::num_to_byte_array(rx_time, payload + RX_TIME_ID, 5);
     }
 
     //from raw data
@@ -199,40 +190,40 @@ class AnchorInfoPacket {
     }
 
     //get components
-    uint16_t get_cir_real() const {
-        return (uint16_t)PacketHelpers::byte_array_to_num(payload + CIR_REAL_ID, 2);
+    uint32_t get_cir_real() const {
+        return (uint32_t)PacketHelpers::byte_array_to_num(payload + CIR_REAL_ID, 4);
     }
-    uint16_t get_cir_imaginary() const {
-        return (uint16_t)PacketHelpers::byte_array_to_num(payload + CIR_IMAGINARY_ID, 2);
+    uint32_t get_cir_imaginary() const {
+        return (uint32_t)PacketHelpers::byte_array_to_num(payload + CIR_IMAGINARY_ID, 4);
     }
-    uint8_t get_phase_correction() const {
-        return payload[PHASE_CORRECTION_ID];
+    uint16_t get_phase_correction() const {
+        return (uint16_t)PacketHelpers::byte_array_to_num(payload + PHASE_CORRECTION_ID, 2);
     }
-    uint8_t get_preamble_accumulation() const {
-        return payload[PREAMBLE_ACCUMULATION_ID];
+    uint16_t get_preamble_accumulation() const {
+        return (uint16_t)PacketHelpers::byte_array_to_num(payload + PREAMBLE_ACCUMULATION_ID, 2);
     }
-    uint16_t get_max_growth_cir() const {
-        return (uint16_t)PacketHelpers::byte_array_to_num(payload + MAX_GROWTH_CIR_ID, 2);
+    uint32_t get_max_growth_cir() const {
+        return (uint32_t)PacketHelpers::byte_array_to_num(payload + MAX_GROWTH_CIR_ID, 4);
     }
     uint64_t get_rx_time() const {
         return PacketHelpers::byte_array_to_num(payload + RX_TIME_ID, 5);
     }
 
     //set components
-    void set_cir_real(uint16_t cir_real) {
-         PacketHelpers::num_to_byte_array(cir_real, payload + CIR_REAL_ID, 2);
+    void set_cir_real(uint32_t cir_real) {
+         PacketHelpers::num_to_byte_array(cir_real, payload + CIR_REAL_ID, 4);
     }
-    void set_cir_imaginary(uint16_t cir_imaginary) {
-        PacketHelpers::num_to_byte_array(cir_imaginary, payload + CIR_IMAGINARY_ID, 2);
+    void set_cir_imaginary(uint32_t cir_imaginary) {
+        PacketHelpers::num_to_byte_array(cir_imaginary, payload + CIR_IMAGINARY_ID, 4);
     }
-    void set_phase_correction(uint8_t phase_correction) {
-        payload[PHASE_CORRECTION_ID] = phase_correction;
+    void set_phase_correction(uint16_t phase_correction) {
+        PacketHelpers::num_to_byte_array(phase_correction, payload + PHASE_CORRECTION_ID, 2);
     }
-    void set_preamble_accumulation(uint8_t preamble_accumulation) {
-        payload[PREAMBLE_ACCUMULATION_ID] = preamble_accumulation;
+    void set_preamble_accumulation(uint16_t preamble_accumulation) {
+        PacketHelpers::num_to_byte_array(preamble_accumulation, payload + PREAMBLE_ACCUMULATION_ID, 2);
     }
-    void set_max_growth_cir(uint16_t max_growth_cir) {
-        PacketHelpers::num_to_byte_array(max_growth_cir, payload + MAX_GROWTH_CIR_ID, 2);
+    void set_max_growth_cir(uint32_t max_growth_cir) {
+        PacketHelpers::num_to_byte_array(max_growth_cir, payload + MAX_GROWTH_CIR_ID, 4);
     }
     void set_rx_time(uint64_t rx_time) {
         PacketHelpers::num_to_byte_array(rx_time, payload + RX_TIME_ID, 5);

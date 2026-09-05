@@ -80,7 +80,7 @@ static uint64_t tx_ts;
 //Channel Impulse Response = CIR
 static uint8_t cir_buffer[4 * CIR_LEN + 1];
 
-//will alternate between 1 and 3
+//will alternate between 1 and 3 (unused)
 static uint16_t current_freq = 1;
 
 // Anchor 0 start error number
@@ -270,6 +270,8 @@ int dw_main(void)
 			final_msg_set_ts(&msg_payload[offset], rx_ts);
 
 			//weird that we're sending a message before all the most recent data is collected, but I guess it's probably for a reason...
+			//reason: we don't actually update the sending_data with it. We only update the outgoing frame at the end of the transaction. (save for sequence number)
+			//we want to collect that now so it doesn't get potentially overwritten when we go to push out another message (but why do we collect the other stuff later then?)
 			// It's our turn to send a message. We should send later if we are anchor 0 and it's time for hopping
 			if (
 				((current_tx + 1) % ANCHOR_NUM == ANCHOR_ID) //next sender id is ours
@@ -334,6 +336,7 @@ int dw_main(void)
 			phase_cal = temp[4];
 
 			// Read max growth cir and rxPC for RSSI estimation
+			//CIR_PWR - Channel Impulse Response Power
 			//for the DW3000, found using dwt_readdiagnostics under ipatovF1-6 (?)			
 			maxGC = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x6);
 
@@ -348,13 +351,15 @@ int dw_main(void)
 			//use that to read accumulator data (page 228 of the DW3000 manual, even though this is the DW1000. I want to port this stuff to the DW3000)
 			dwt_readaccdata(cir_buffer,
 				CIR_LEN * 4 + 1, //13 bytes. Why is this 13 bytes?
-				(fp_index) * 4 //offset it to where the CIR is kept (not sure why the *4 though)
+				(fp_index) * 4 //offset it to where the CIR is kept (not sure why the *4 though) (probably because each entry is 2+2 bytes long)
 			);
 
 			// Copy CIR to msg_payload (skipping our anchor)
 			if (current_tx < ANCHOR_ID)
 			{
 				//anchors less than ours
+
+				//take the second entry in the cir buffer
 				memcpy(msg_payload + SINGLE_LEN * current_tx, cir_buffer + 1 + 4, 4);
 			}
 			else
@@ -498,7 +503,7 @@ int dw_main(void)
 		}
 		else
 		{
-
+			//(don't actually need this, everything happens with an error count of 1, so we can just have it happen instead)
 			err_num++;
 
 			// Handling packet loss

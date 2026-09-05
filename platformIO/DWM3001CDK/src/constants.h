@@ -23,6 +23,8 @@
 //ditto, but add to that the time it takes the radio to chang efrequencies
 #define TURNAROUND_HOP_TIME_US 600
 
+//how much of the channel impulse response to read
+#define CIR_LEN 3
 
 
 ///////////////////DWM3001CDK-specific defines

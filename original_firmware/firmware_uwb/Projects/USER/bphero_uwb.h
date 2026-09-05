@@ -43,6 +43,10 @@
 //[2 bytes ][2 bytes][1 byte          ][1 byte               ][2 bytes       ][5 bytes]
 //[CIR real][CIR img][phase correction][preamble accumulation][max growth cir][rx time]
 
+//DW3000: 21 bytes total
+//[4 bytes ][4 bytes][2 byte          ][2 byte               ][4 bytes       ][5 bytes]
+//[CIR real][CIR img][phase correction][preamble accumulation][max growth cir][rx time]
+
 //length of a single set of data from an anchor
 #define SINGLE_LEN 13
 
@@ -73,6 +77,7 @@
 
 /* Length of channel impulse response to read from the accumulator buffer*/
 //each complex/real value is 3 bytes long (6 for the whole number). Maybe that's why it's like this?
+//Ans: no, with the DW1000, each complex value is 2+2 bytes long. I think this just means we want 3 of these.
 #define CIR_LEN 3
 
 #define NET_PANID 0xF0F2
