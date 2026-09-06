@@ -7,10 +7,10 @@
 //#define TAG
 
 //needs to be changed for each anchor to do proper scheduling
-#define ANCHOR_ID 2
+#define ANCHOR_ID 1
 
 //max anchor count
-#define ANCHOR_NUM 3
+#define ANCHOR_NUM 2
 
 //we need to calibrate the board in order to get these
 #define RX_ANT_DELAY 16385
@@ -22,9 +22,10 @@
 #define RX_TIMEOUT 2500
 
 //the time in microseconds to process an incoming packet and send it back out
-#define TURNAROUND_TIME_US 600
+//this value varies between MCUs, so it must be found for each new one (SPI speeds eat most of this. I'm currently limited to 8Mhz with the NRF52833)
+#define TURNAROUND_TIME_US 4000
 //ditto, but add to that the time it takes the radio to chang efrequencies
-#define TURNAROUND_HOP_TIME_US 600
+#define TURNAROUND_HOP_TIME_US 4000
 
 //how much of the channel impulse response to read
 #define CIR_LEN 3

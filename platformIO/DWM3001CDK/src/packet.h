@@ -263,7 +263,7 @@ class TokenRingPacket {
         memcpy(this->payload, compiled, TOTAL_LENGTH);
     }
 
-    //set what index this packet corresponds to
+    //set what index / anchor number this packet corresponds to
     //guards against setting an OOB number, returns true if it was set successfully
     bool set_index(uint8_t index) {
         //OOB guard
