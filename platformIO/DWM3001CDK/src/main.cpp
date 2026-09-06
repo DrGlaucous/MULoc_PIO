@@ -4,6 +4,7 @@
 #include "dw3000.h"
 #include "dw3000_regs.h"
 #include "dw3000_shared_defines.h"
+//#include "dw3000_device_api.h"
 #include "SPI.h"
 #include "packet.h"
 
@@ -189,9 +190,28 @@ int wait_for_message_with_timeout(uint32_t timeout_ms, bool no_timeout = false) 
 
 
 
+//set the radio's output channel
+void set_channel_config(bool is_freq_5) {
+    radio->dwt_forcetrxoff();
+    if(is_freq_5) {
+        //Serial.print("CHN: 5 ");
+        //Serial.print(" ");
+
+        while(radio->dwt_configure(&config_ch5) != DWT_SUCCESS);
+        radio->dwt_configuretxrf(&txconfig_ch5); 
+    } else {
+        //Serial.print("CHN: 9 ");
+        //Serial.print(" ");
+
+        while(radio->dwt_configure(&config_ch9) != DWT_SUCCESS);
+        radio->dwt_configuretxrf(&txconfig_ch9);
+    }
+}
+
 ////////////////////main methods
 
 //just blasts packets. How fast can we go?
+bool freq_flipper = false;
 void loop_test() {
 
     auto tick = micros();
@@ -217,7 +237,9 @@ void loop_test() {
     Serial.print(" ");
     Serial.println(total);
 
-    //delay(10);
+    set_channel_config(freq_flipper);
+    freq_flipper = !freq_flipper;
+    //delay(1000);
 
 
 }
@@ -227,7 +249,114 @@ void loop_test() {
 //custom anchor loop
 void loop_a_custom() {
 
-    //we'll just start with a simple token ring
+    //we'll just start with a simple token ring loop between ANCHOR_NUM anchors
+
+    //start with clean slate
+    radio->clear_system_status();
+
+    //ensure frequency is set to 5 to begin with
+    bool is_freq_5 = true;
+    set_channel_config(is_freq_5);
+
+
+    //initiator
+    if(ANCHOR_ID == 0) {
+
+        auto payload = TokenRingPacket();
+        payload.set_index(ANCHOR_ID);
+        payload.set_sequence_no(0);
+        UWBPacket outgoing = UWBPacket(
+            get_uuid(),
+            UWBPacket::BROADCAST_MAC,
+            PacketType::TokenRing,
+            payload.get_compiled(),
+            payload.get_compiled_len()
+        );
+
+        send_packet(outgoing, DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
+    } else {
+
+        //start listening
+	    radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
+    }
+
+    while(1) {
+
+        auto message_result = wait_for_message_with_timeout(1000);
+
+        //got message
+        if(message_result == 0) {
+
+            //get frame data in
+            auto frame = get_packet();
+            auto payload = TokenRingPacket(frame.get_payload());
+            uint8_t anchor_number = payload.get_index();
+            uint8_t sequence_number = payload.get_sequence_no();
+
+            //got a packet from the last radio, flip frequencies
+            if(anchor_number == ANCHOR_NUM - 1) {
+                is_freq_5 = !is_freq_5;
+                set_channel_config(is_freq_5);
+            }
+
+            //our turn to send
+            if((anchor_number + 1) % ANCHOR_NUM == ANCHOR_ID) {
+
+                Serial.print("From: ");
+                Serial.print(anchor_number);
+                Serial.print(" Sequence: ");
+                Serial.println(sequence_number);
+                
+                auto payload = TokenRingPacket();
+                payload.set_index(ANCHOR_ID);
+
+                //new round, increment the sequence number
+                if(ANCHOR_ID == 0) {
+                    payload.set_sequence_no(sequence_number + 1);
+                } else {
+                    payload.set_sequence_no(sequence_number);
+                }
+
+
+                UWBPacket outgoing = UWBPacket(
+                    get_uuid(),
+                    UWBPacket::BROADCAST_MAC,
+                    PacketType::TokenRing,
+                    payload.get_compiled(),
+                    payload.get_compiled_len()
+                );
+
+                //last anchor in the series, we will be switching frequencies after this sends, so don't expect a packet back
+                if(ANCHOR_ID == ANCHOR_NUM - 1) {
+
+                    //send packet without expected rx
+                    send_packet(outgoing, DWT_START_TX_IMMEDIATE);
+                    
+                    //switch frequencies
+                    is_freq_5 = !is_freq_5;
+                    set_channel_config(is_freq_5);
+                    //begin listening for the next packet
+                    radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
+
+                } else {
+                    send_packet(outgoing, DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
+                }                
+            } else {
+                //not our turn, start listening for another
+                radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
+            }
+
+
+
+
+        } else if(message_result == 1) {
+            //timeout, restart initialization
+            Serial.println("timeout");
+            return;
+        }
+    }
+
+
 
 }
 
@@ -788,6 +917,8 @@ void setup() {
 	Serial.begin(BAUD_RATE);
 	Serial.println("Begin");
 
+    SoftwareSerial
+
 
 	// sets up the SPI connection to the DW3000 radio
 	SPI = SPIClass(NRF_SPI2, SPI_MISO, SPI_CLK, SPI_MOSI);
@@ -849,7 +980,8 @@ void setup() {
 
 void loop() {
 
-    loop_test();
+    loop_a_custom();
+    //loop_test();
     return;
 
 #ifdef TAG

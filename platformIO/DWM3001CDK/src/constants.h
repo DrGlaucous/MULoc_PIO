@@ -7,10 +7,10 @@
 //#define TAG
 
 //needs to be changed for each anchor to do proper scheduling
-#define ANCHOR_ID 0
+#define ANCHOR_ID 2
 
 //max anchor count
-#define ANCHOR_NUM 2
+#define ANCHOR_NUM 3
 
 //we need to calibrate the board in order to get these
 #define RX_ANT_DELAY 16385
