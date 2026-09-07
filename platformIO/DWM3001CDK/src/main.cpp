@@ -144,10 +144,51 @@ UWBPacket get_packet() {
 }
 
 
+//check for gotten frame, returns 0 on nothing, 1 on success, 2 on bad checksum, 3 on error
+int clone_check_for_rx() {
+
+    //get current status
+    int sys_stat = radio->dwt_read32bitreg(SYS_STATUS_ID);
+    
+    //got packet
+    if((sys_stat & SYS_STATUS_RXFCG_BIT_MASK) > 0) {
+        return 1;
+    }
+    //got packet (bad checksum, if we got a good checksum, both this bit and the one above is set. Otherwise, only this bit will be set.)
+    else if ((sys_stat & SYS_STATUS_RXFR_BIT_MASK) > 0) {
+        return 2;
+    } 
+    //got error
+    else if ((sys_stat & SYS_STATUS_ALL_RX_ERR) > 0) {
+        return 3;
+    }
+    return 0;
+
+    //in checking for RX errors, the simple library used:
+    //(1 << 26)     RXSTO yes
+    //(1 << 21)     RXPTO no (preamble detection timeout)
+    //(1 << 18)     CIAERR yes
+    //(1 << 17)     RXFTO no (Receive Frame Wait Timeout)
+    //(1 << 16)     RXFSL yes
+    //(1 << 15)     RXFCE yes     (rxfcg is not included here)
+    //(1 << 12)     RXPHE yes
+    //#define SYS_STATUS_RX_ERR 0x4279000
+
+    //the rx example for the makerfabs library used:
+    //SYS_STATUS_RXFCG_BIT_MASK no
+    //SYS_STATUS_RXPHE_BIT_MASK yes
+    //SYS_STATUS_RXFCE_BIT_MASK yes
+    //SYS_STATUS_RXFSL_BIT_MASK yes
+    //SYS_STATUS_RXSTO_BIT_MASK yes
+    //SYS_STATUS_ARFE_BIT_MASK no (automatic frame filtering rejection)
+    //SYS_STATUS_CIAERR_BIT_MASK yes
+
+}
+
 //blocks until the radio gets a message in or until timeout_ms is reached.
 //we can also wait for timeout using dwt_setrxtimeout...
 //the radio must already be set to the correct mode with a fast command!
-//returns 0 on success, 1 on timeout, -1 on error
+//returns 0 on timeout, 1 on success, 2 on bad checksum, 3 on general error
 int wait_for_message_with_timeout(uint32_t timeout_ms, bool no_timeout = false) {
 
 
@@ -155,35 +196,14 @@ int wait_for_message_with_timeout(uint32_t timeout_ms, bool no_timeout = false) 
 	bool error = false;
 	auto tx_time = millis();
 	while(no_timeout || (millis() - tx_time < timeout_ms)) {
-		//bool error = false;
 		auto response = radio->check_for_rx();
-		switch(response) {
+        if(response) {
+            return response;
+        }
 
-			case 1: //got correct packet
-			{
-				got_response = true;
-				break;
-			}
-			case 2:
-			case 3: //some error, we got a packet, but we need to try again; it was corrupted
-			{
-				error = true;
-				break;
-			}
-		}
-		//break ouf of while loop
-		if(error || got_response) {
-			break;
-		}
 	}
 
-	if(got_response) {
-		return 0;
-	} if(error) {
-		return -1;
-	} else {
-		return 1;
-	}
+	return 0;
 
 
 }
@@ -206,6 +226,8 @@ void set_channel_config(bool is_freq_5) {
         while(radio->dwt_configure(&config_ch9) != DWT_SUCCESS);
         radio->dwt_configuretxrf(&txconfig_ch9);
     }
+    //force it to log important telemetry
+    radio->dwt_configciadiag(DW_CIA_DIAG_LOG_ALL);
 }
 
 //set the time at which the next transaction should happen
@@ -296,16 +318,15 @@ void loop_a_custom() {
 	    radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
     }
 
-    //runs as long as we don't have packet timeouts
-    //returns if rx times out
+    //runs as long as we don't have packet timeouts or errors
     while(1) {
 
-        auto message_result = wait_for_message_with_timeout(1000);
+        auto message_result = wait_for_message_with_timeout(RX_TIMEOUT_MS);
 
         //got message
-        if(message_result == 0) {
+        if(message_result == 1) {
 
-            uint32_t tick = micros();
+            //uint32_t tick = micros();
 
             //reset radio status
 			radio->clear_system_status();
@@ -372,8 +393,18 @@ void loop_a_custom() {
                 rx_anchor_info.set_max_growth_cir(max_gc);
                 rx_anchor_info.set_rx_time(rx_time);
 
+                //test diagnostics data to ensure AnchorInfoPacket is working correctly
+                // rx_anchor_info.set_cir_real(0xFF114433);
+                // rx_anchor_info.set_cir_imaginary(0x7A887766);
+                // rx_anchor_info.set_phase_correction(0x5566);
+                // rx_anchor_info.set_preamble_accumulation(0x7744);
+                // rx_anchor_info.set_max_growth_cir(0xAAEEFF44);
+                // rx_anchor_info.set_rx_time(0x1122334455);
+
                 //store updated settings
                 updating_packet.set_packet_at(rx_anchor_info, anchor_number);
+
+                auto ress = updating_packet.get_packet_at(1);
                 
             }
 
@@ -386,13 +417,10 @@ void loop_a_custom() {
             //our turn to send
             if((anchor_number + 1) % ANCHOR_NUM == ANCHOR_ID) {
 
-                Serial.print("From: ");
-                Serial.print(anchor_number);
-                Serial.print(" Sequence: ");
-                Serial.println(sequence_number);
-
                 //copy all data from the updated packet to the outgoing packet just before we send it
                 outgoing_packet = TokenRingPacket(updating_packet.get_compiled());
+
+
 
                 //we only need to do this once per lap
                 //new round, increment the sequence number
@@ -400,6 +428,45 @@ void loop_a_custom() {
                     outgoing_packet.set_sequence_no(sequence_number + 1);
                 } else {
                     outgoing_packet.set_sequence_no(sequence_number);
+                }
+
+                //debug printing
+                if (0) {
+                    // Serial.print("From: ");
+                    // Serial.print(anchor_number);
+                    // Serial.print(" Sequence: ");
+                    // Serial.println(sequence_number);
+
+                    //for that anchor, iterate through all anchors again
+                    for(int j = 0; j < ANCHOR_NUM; ++j) {
+
+                        //skip the main anchor
+                        if(j == ANCHOR_ID) {
+                            continue;
+                        }
+
+                        //print all data from the ranging packet from i to j
+                        auto range_to_packet = outgoing_packet.get_packet_at(j);
+                        Serial.print(range_to_packet.get_cir_real(), HEX);
+                        Serial.print(",");
+                        Serial.print(range_to_packet.get_cir_imaginary(), HEX);
+                        Serial.print(",");
+                        Serial.print(range_to_packet.get_phase_correction(), HEX);
+                        Serial.print(",");
+                        Serial.print(range_to_packet.get_preamble_accumulation(), HEX);
+                        Serial.print(",");
+                        Serial.print(range_to_packet.get_max_growth_cir(), HEX);
+                        Serial.print(",");
+                        print_u64(range_to_packet.get_rx_time(), HEX);
+                        Serial.print(",");
+                        Serial.print(j, HEX);
+                        Serial.print(",");
+
+
+                    }
+                    Serial.print(outgoing_packet.get_sequence_no());
+                    Serial.print(",");
+                    Serial.println(outgoing_packet.get_index(), HEX);
                 }
 
 
@@ -427,6 +494,12 @@ void loop_a_custom() {
 
                     //send packet without expected rx
                     auto send_result = send_packet(outgoing, DWT_START_TX_DELAYED); //DWT_START_TX_DELAYED
+
+                    //failed to send on time, the radio was put into idle mode, so restart the whole thing
+                    if(!send_result) {
+                        Serial.println("Failed to send on time!");
+                        return;
+                    }
                     
                     //switch frequencies
                     is_freq_5 = !is_freq_5;
@@ -444,6 +517,11 @@ void loop_a_custom() {
 
                     auto send_result = send_packet(outgoing, DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED);
 
+                    if(!send_result) {
+                        Serial.println("Failed to send on time!");
+                        return;
+                    }
+
                     //to this point, it is ~4000 micros
                     //SPI takes most of this time. I need to go faster.
 
@@ -454,12 +532,20 @@ void loop_a_custom() {
             }
 
 
+        } else {
+            //general errors and bad checksums
+            while(0) {
+                Serial.println("error: ");
+                int sys_stat = radio->dwt_read32bitreg(SYS_STATUS_ID);
+                Serial.println(sys_stat | (1 << 31), 2);
+                Serial.println(SYS_STATUS_ALL_RX_ERR | (1 << 31), 2);
+                Serial.print("Is Ch 5: ");
+                Serial.println(is_freq_5);
+                delay(1000);
+            }
 
-
-        } else if(message_result == 1) {
-            //timeout, restart initialization
-            Serial.println("timeout");
-            return;
+            //not sure if I should return or just clear status with general errors
+            return; 
         }
     }
 
@@ -498,7 +584,7 @@ void loop_t_custom() {
         auto rx_result = wait_for_message_with_timeout(0, true);
 
         //got successful packet
-        if(rx_result == 0) {
+        if(rx_result == 1) {
 
             auto frame = get_packet();
             //get token ring from sender
@@ -511,6 +597,13 @@ void loop_t_custom() {
             //stow gotten packet
             anchor_datas[anchor_number] = TokenRingPacket(tr_packet.get_compiled());
             rx_timestamps[anchor_number] = radio->get_rx_timestamp_u64();
+
+            // if(anchor_number == 0) {
+            //     Serial.print(anchor_number);
+            //     Serial.print(" ");
+            //     print_u64(rx_timestamps[anchor_number], HEX);
+            //     Serial.println("");
+            // }
 
             //store important telemetry data
             {
@@ -554,64 +647,71 @@ void loop_t_custom() {
             //last anchor in the list, we got all the packets for this round
             if(anchor_number == ANCHOR_NUM - 1) {
 
-                                //iterate through all anchors and dump their data to serial
-                for(int i = 0; i < ANCHOR_NUM; ++i) {
 
-                    //for that anchor, iterate through all anchors again
-                    for(int j = 0; j < ANCHOR_NUM; ++j) {
+                if(1) {
+                    //iterate through all anchors and dump their data to serial
+                    Serial.print("A ");
+                    Serial.println(is_freq_5);
+                    for(int i = 0; i < ANCHOR_NUM; ++i) {
 
-                        //skip the main anchor
-                        if(j == i) {
-                            continue;
+                        //for that anchor, iterate through all anchors again
+                        for(int j = 0; j < ANCHOR_NUM; ++j) {
+
+                            //skip the main anchor
+                            if(j == i) {
+                                continue;
+                            }
+
+                            //print all data from the ranging packet from i to j
+                            auto range_to_packet = anchor_datas[i].get_packet_at(j);
+                            Serial.print(range_to_packet.get_cir_real(), HEX);
+                            Serial.print(",");
+                            Serial.print(range_to_packet.get_cir_imaginary(), HEX);
+                            Serial.print(",");
+                            Serial.print(range_to_packet.get_phase_correction(), HEX);
+                            Serial.print(",");
+                            Serial.print(range_to_packet.get_preamble_accumulation(), HEX);
+                            Serial.print(",");
+                            Serial.print(range_to_packet.get_max_growth_cir(), HEX);
+                            Serial.print(",");
+                            print_u64(range_to_packet.get_rx_time(), HEX);
+                            Serial.print(",");
+                            Serial.print(j, HEX);
+                            Serial.print(",");
+
+
                         }
-
-                        //print all data from the ranging packet from i to j
-                        auto range_to_packet = anchor_datas[i].get_packet_at(j);
-                        Serial.print(range_to_packet.get_cir_real(), HEX);
+                        Serial.print(anchor_datas[i].get_sequence_no());
                         Serial.print(",");
-                        Serial.print(range_to_packet.get_cir_imaginary(), HEX);
-                        Serial.print(",");
-                        Serial.print(range_to_packet.get_phase_correction(), HEX);
-                        Serial.print(",");
-                        Serial.print(range_to_packet.get_preamble_accumulation(), HEX);
-                        Serial.print(",");
-                        Serial.print(range_to_packet.get_max_growth_cir(), HEX);
-                        Serial.print(",");
-                        print_u64(range_to_packet.get_rx_time(), HEX);
-                        Serial.print(",");
-                        Serial.print(j, HEX);
-                        Serial.print(",");
-
+                        Serial.println(i, HEX);
 
                     }
-                    Serial.print(anchor_datas[i].get_sequence_no());
-                    Serial.print(",");
-                    Serial.println(i, HEX);
-
-                }
 
 
-                //iterate through novel data and dump it to serial as well
-                for(int i = 0; i < ANCHOR_NUM; ++i) {
+                    //iterate through novel data and dump it to serial as well
+                    Serial.println("T");
+                    for(int i = 0; i < ANCHOR_NUM; ++i) {
 
-                    Serial.print(cir_reals[i], HEX);
-                    Serial.print(",");
-                    Serial.print(cir_imgs[i], HEX);
-                    Serial.print(",");
-                    Serial.print(phase_cals[i], HEX);
-                    Serial.print(",");
-                    Serial.print(rx_pcs[i], HEX);
-                    Serial.print(",");
-                    Serial.print(max_gcs[i], HEX);
-                    Serial.print(",");
-                    print_u64(rx_timestamps[i], HEX);
-                    Serial.print(",");
-                    Serial.print(carrier_integrators[i], HEX);
-                    
-                    Serial.print(",");
-                    Serial.print(anchor_datas[i].get_sequence_no());
-                    Serial.print(",");
-                    Serial.println(i, HEX);
+                        Serial.print(cir_reals[i], HEX);
+                        Serial.print(",");
+                        Serial.print(cir_imgs[i], HEX);
+                        Serial.print(",");
+                        Serial.print(phase_cals[i], HEX);
+                        Serial.print(",");
+                        Serial.print(rx_pcs[i], HEX);
+                        Serial.print(",");
+                        Serial.print(max_gcs[i], HEX);
+                        Serial.print(",");
+                        print_u64(rx_timestamps[i], HEX);
+                        Serial.print(",");
+                        Serial.print(carrier_integrators[i], HEX);
+                        
+                        Serial.print(",");
+                        Serial.print(anchor_datas[i].get_sequence_no());
+                        Serial.print(",");
+                        Serial.println(i, HEX);
+                    }
+
                 }
 
 
@@ -621,7 +721,17 @@ void loop_t_custom() {
 
 
             }
+        } else {
+            //got some sort of error, re-initialize
+            Serial.println("RX Error");
+            return;
         }
+    
+    
+    
+    
+    
+    
     }
 
 
@@ -1222,15 +1332,15 @@ void setup() {
     //manual LED control
 	//radio->gpio_init_output();
 
+    //happens in the loop, don't need to do it here
     //set up general radio configuration
-	while (radio->dwt_configure(&config_ch5))
-	{
-		Serial.println("Config failed");
-		delay(1000);
-	}
-
-    //set up radio transmission configuration
-    radio->dwt_configuretxrf(&txconfig_ch5);
+	// while (radio->dwt_configure(&config_ch5))
+	// {
+	// 	Serial.println("Config failed");
+	// 	delay(1000);
+	// }
+    // //set up radio transmission configuration
+    // radio->dwt_configuretxrf(&txconfig_ch5);
 
     radio->dwt_setrxantennadelay(RX_ANT_DELAY);
 	radio->dwt_settxantennadelay(TX_ANT_DELAY);

@@ -245,7 +245,7 @@ class TokenRingPacket {
 
     //we don't need the TX timestamp because the total held time is fixed for all anchors (rxtime + some constant)
     //allocate room for all anchor data - our anchor, + 1 for our anchor ID + 1 for our sequence number
-    static const uint8_t TOTAL_LENGTH = PAYLOAD_ID + (ANCHOR_NUM - 1) * RangingPacket::TOTAL_LENGTH;
+    static const uint8_t TOTAL_LENGTH = PAYLOAD_ID + (ANCHOR_NUM - 1) * AnchorInfoPacket::TOTAL_LENGTH;
     
     private:
 

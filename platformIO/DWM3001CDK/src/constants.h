@@ -4,7 +4,7 @@
 ///////////////////code-specific defines
 
 //true if the device is a tag
-//#define TAG
+#define TAG
 
 //needs to be changed for each anchor to do proper scheduling
 #define ANCHOR_ID 1
@@ -26,6 +26,10 @@
 #define TURNAROUND_TIME_US 4000
 //ditto, but add to that the time it takes the radio to chang efrequencies
 #define TURNAROUND_HOP_TIME_US 4000
+
+//how many milliseconds to wait for a message before calling it quits
+//I currently have it set around double the TURNAROUND_TIME_US
+#define RX_TIMEOUT_MS 10
 
 //how much of the channel impulse response to read
 #define CIR_LEN 3
