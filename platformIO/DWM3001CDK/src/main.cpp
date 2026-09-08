@@ -573,8 +573,8 @@ void loop_t_custom() {
     uint32_t cir_imgs[ANCHOR_NUM] = {};
     int32_t carrier_integrators[ANCHOR_NUM] = {};
     uint16_t phase_cals[ANCHOR_NUM] = {};
-    uint32_t max_gcs[ANCHOR_NUM] = {};
-    uint16_t rx_pcs[ANCHOR_NUM] = {};
+    uint32_t max_gcs[ANCHOR_NUM] = {}; //max growth CIR
+    uint16_t rx_pcs[ANCHOR_NUM] = {}; //preamble accumulation count
 
 
     while(1) {
