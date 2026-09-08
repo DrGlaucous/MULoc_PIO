@@ -576,6 +576,10 @@ void loop_t_custom() {
     uint32_t max_gcs[ANCHOR_NUM] = {}; //max growth CIR
     uint16_t rx_pcs[ANCHOR_NUM] = {}; //preamble accumulation count
 
+    //a bodge to accommodate the slow serial printing, ensures we heard all anchors in at least one full round before printing the data.
+    //I need to make the data transfer protocol more compact. I hesitate to go faster, but it might come to that too
+    //this is adequate enough for testing though
+    bool heard_anchor_0 = false;
 
     while(1) {
         //start listening
@@ -598,12 +602,13 @@ void loop_t_custom() {
             anchor_datas[anchor_number] = TokenRingPacket(tr_packet.get_compiled());
             rx_timestamps[anchor_number] = radio->get_rx_timestamp_u64();
 
-            // if(anchor_number == 0) {
-            //     Serial.print(anchor_number);
-            //     Serial.print(" ");
-            //     print_u64(rx_timestamps[anchor_number], HEX);
-            //     Serial.println("");
-            // }
+            if(anchor_number == 0) {
+                // Serial.print(anchor_number);
+                // Serial.print(" ");
+                // print_u64(rx_timestamps[anchor_number], HEX);
+                // Serial.println("");
+                heard_anchor_0 = true;
+            }
 
             //store important telemetry data
             {
@@ -648,7 +653,11 @@ void loop_t_custom() {
             if(anchor_number == ANCHOR_NUM - 1) {
 
 
-                if(1) {
+                if(heard_anchor_0) {
+
+                    heard_anchor_0 = false;
+                    //auto tick = micros();
+                    
                     //iterate through all anchors and dump their data to serial
                     Serial.print("A ");
                     Serial.println(is_freq_5);
@@ -712,6 +721,11 @@ void loop_t_custom() {
                         Serial.println(i, HEX);
                     }
 
+                    //printing all this takes ~4.5 milliseconds
+                    //it takes too long to hear the first anchor again after printing
+                    //I need to swap raw printing for shooting out binary data
+                    //auto tock = micros();
+                    //Serial.println(tock - tick);
                 }
 
 
