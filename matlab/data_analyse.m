@@ -76,7 +76,7 @@ idx_temp = mod(tag.idx,4);
 % Initialize an empty array to store the useful indices
 useful_idx = [];
 
-% Filter out those indices exists packet loss
+% Filter out those indices where there exists packet loss
 for  i = 1:length(idx_temp)-4
 
     % The pattern should be 0, 1, 2, 3, 0 which indicates no packet loss in the cycle
