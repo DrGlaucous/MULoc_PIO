@@ -553,7 +553,7 @@ void loop_a_custom() {
 
 }
 
-
+//custom tag loop
 void loop_t_custom() {
 
 
@@ -580,6 +580,10 @@ void loop_t_custom() {
     //I need to make the data transfer protocol more compact. I hesitate to go faster, but it might come to that too
     //this is adequate enough for testing though
     bool heard_anchor_0 = false;
+
+    //more: With the code above, I'm only getting data from ch5 or ch9, not a mix, which is what I want. This is to force them to alternate.
+    //Wait another packet if you have to, I need a channel mix!
+    bool last_frequency_heard = is_freq_5;
 
     while(1) {
         //start listening
@@ -652,9 +656,10 @@ void loop_t_custom() {
             //last anchor in the list, we got all the packets for this round
             if(anchor_number == ANCHOR_NUM - 1) {
 
+                //conditional printing
+                if(heard_anchor_0 && last_frequency_heard != is_freq_5) {
 
-                if(heard_anchor_0) {
-
+                    last_frequency_heard = is_freq_5;
                     heard_anchor_0 = false;
                     //auto tick = micros();
                     

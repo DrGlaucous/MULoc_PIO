@@ -118,9 +118,10 @@ for i = 1:device_num
 	device.abs(idx, :) = abs(device.complex(idx, :));
 	device.poa(idx, :) = angle(device.complex(idx, :));
 
-	% Extract and store phase calibration data
+	% Extract and store phase calibration data (nothing special done here)
 	device.phase_cali(idx, :) = data(:, base_col + 3)';
 
+	%this is calculated, but never read or used
 	% Calculate RSSI (detailed in DW1000 Manual)
 	c = data(:, base_col + 5);  % max_gain_cir
 	n = data(:, base_col + 4);  % rx_preamble_count
