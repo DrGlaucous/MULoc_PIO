@@ -113,7 +113,7 @@ for i = 1:device_num
 	real_part(real_part > 2^15) = real_part(real_part > 2^15) - 2^16;
 	imag_part(imag_part > 2^15) = imag_part(imag_part > 2^15) - 2^16;
 
-	% Store complex impulse response data
+	% Store complex impulse response data as a complex number and direction + magnitude
 	device.complex(idx, :) = real_part + 1j*imag_part;
 	device.abs(idx, :) = abs(device.complex(idx, :));
 	device.poa(idx, :) = angle(device.complex(idx, :));
