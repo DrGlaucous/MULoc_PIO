@@ -71,14 +71,15 @@ class RangingPacket {
     public:
     
     //times are 40 bits long
-    static const uint8_t TOTAL_LENGTH = 5 + 5 + 1;
+    static const uint8_t TOTAL_LENGTH = 5 + 5 + 1 + 1 + 4 + 4;
 
     //see page 249 to see how these packets are structured
     static const uint8_t TIME_REPLY_U64_ID = 0; //the total time it took from getting a packet to sending out a response
     static const uint8_t TIME_ROUND_U64_ID = 5; //the round trip time for the first leg of the DSTWR (we don't need this for single-sided ranging)
     static const uint8_t FRAME_NO_ID = 10; //used to determine what stage of the ranging process we're in
-
-
+    static const uint8_t TX_NO_ID = 11; //used to determine what order this packet belongs in
+    static const uint8_t CIR_REAL_ID = 12;
+    static const uint8_t CIR_IMG_ID = 16;
 
     private:
     //packet format: [Time reply][Time round][frame number]
@@ -88,13 +89,25 @@ class RangingPacket {
     public:
 
     //construct from individual components
-    RangingPacket(uint64_t time_reply, uint64_t time_round, RangingFrameNum frame_no) {
+    RangingPacket(
+        uint64_t time_reply,
+        uint64_t time_round,
+        RangingFrameNum frame_no,
+        uint8_t tx_no,
+        uint32_t cir_real,
+        uint32_t cir_img
+        ) {
 
         //not 8-byte aligned, so we have to do bytewise copy
         PacketHelpers::num_to_byte_array(time_reply, payload + TIME_REPLY_U64_ID, 5);
         PacketHelpers::num_to_byte_array(time_round, payload + TIME_ROUND_U64_ID, 5);
 
         payload[FRAME_NO_ID] = frame_no;
+        payload[TX_NO_ID] = tx_no;
+
+        PacketHelpers::num_to_byte_array(cir_real, payload + CIR_REAL_ID, 4);
+        PacketHelpers::num_to_byte_array(cir_img, payload + CIR_IMG_ID, 4);
+
 
     }
 
@@ -116,6 +129,21 @@ class RangingPacket {
     //return the frame number
     RangingFrameNum get_frame_no() const {
         return (RangingFrameNum)payload[FRAME_NO_ID];
+    }
+
+    //return the tx number
+    uint8_t get_tx_no() const {
+        return payload[TX_NO_ID];
+    }
+
+    //return the real part of the CIR
+    uint32_t get_cir_real() const {
+        return (uint32_t)PacketHelpers::byte_array_to_num(payload + CIR_REAL_ID, 4);
+    }
+
+    //return the imaginary part of the CIR
+    uint32_t get_cir_imaginary() const {
+        return (uint32_t)PacketHelpers::byte_array_to_num(payload + CIR_IMG_ID, 4);
     }
 
     //return the whole flight-ready packet

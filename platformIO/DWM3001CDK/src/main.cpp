@@ -634,7 +634,7 @@ void loop_t_custom() {
                 //get phase of arrival, see page 180. This record is 14 bits long (in the DW1000, it is 7 bits long)
                 phase_cals[anchor_number] = diagnostics.ipatovPOA;
 
-                            uint8_t complex_byte_len = 6;
+                uint8_t complex_byte_len = 6;
                 //extra 1 for the dummy leading byte we get when starting the read
                 uint8_t cir_buffer[complex_byte_len * CIR_LEN + 1] = {};
                 radio->dwt_readaccdata(cir_buffer, (complex_byte_len * CIR_LEN + 1), fp_index * complex_byte_len);

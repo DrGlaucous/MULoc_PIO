@@ -4,7 +4,7 @@
 ///////////////////code-specific defines
 
 //true if the device is a tag
-#define TAG
+//#define TAG
 
 //not used for anything other than the token ring packets, keeping it around in case we need it though
 #define ANCHOR_NUM 2
