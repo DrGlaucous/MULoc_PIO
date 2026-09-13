@@ -115,38 +115,38 @@ int dw_main(void)
 	  //TX_ANT_DLY = rfDelaysTREK[1];
 	
 	
-	// 修改为我们自己的代码
+	// Modify it to use our own code.
 		reset_DW1000();
 	
 		SPI_ConfigFastRate(SPI_BaudRatePrescaler_32);
 	
-		// 初始化DW1000
+		// Initialize the DW1000
 		if(dwt_initialise(DWT_LOADUCODE) == DWT_ERROR)
 		{
 			while(1){};
 		}
 		
 		dwt_xtaltrim(16);
-		// 将SPI调整至18MHz
+		// Adjust the SPI to 18 MHz.
 		SPI_ConfigFastRate(SPI_BaudRatePrescaler_4);
-		// 配置工作频率
+		// Configure the operating frequency
 		
 //		config.txCode = 10;
 //		config.rxCode = 10;
 		dwt_configure(&config);
-		// 启动DW1000状态指示灯
+		// Activate the DW1000 status indicator.
 		dwt_setleds(1);
-		// 配置发送功率
+		// Configure transmit power
 		dwt_configuretxrf(&txconfig2);
-		// 设置工作网络ID
+		// Set Work Network ID
 		dwt_setpanid(NET_PANID);
-		// 设置自身短地址
+		// Set own short address
 		dwt_setaddress16(1);
-		// 配置天线延迟
+		// Configure antenna delay
 		dwt_setrxaftertxdelay(RX_ANT_DLY);
 		dwt_settxantennadelay(TX_ANT_DLY);
 		
-		// 设置DW1000中断，虽然并没有用到
+		// Configuring the DW1000 interrupt, although it is not actually used.
 		dwt_setinterrupt(DWT_INT_RFCG | (DWT_INT_ARFE | DWT_INT_RFSL | DWT_INT_SFDT | DWT_INT_RPHE | DWT_INT_RFCE | DWT_INT_RFTO /*| DWT_INT_RXPTO*/), 1);
 		
 		BPhero_UWB_Message_Init();
@@ -167,16 +167,16 @@ int dw_main(void)
 				dwt_writetxdata(psduLength+1, (uint8 *)&msg_f_send, 0);
 			
 				dwt_writetxfctrl(psduLength+1,0);
-				// 设置发送到接收开启的时间
+				// Set the time to start sending to the receiver.
 				dwt_setrxaftertxdelay(POLL_TX_TO_RESP_RX_DLY_UUS);
-				// 设置超时时间
+				// Set the timeout duration.
 				dwt_setrxtimeout(300);
-				// 设置Preamble超时时间
+				// Set the preamble timeout.
 				dwt_setpreambledetecttimeout(0);
-				// 启动立即发送
+				// Send immediately upon startup
 				dwt_starttx(DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
 			
-				//等待接收完成
+				//Waiting for reception to complete
 				while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_ERR)))
 				{};
 				
@@ -190,9 +190,9 @@ int dw_main(void)
 						
 						if (frame_len <= FRAME_LEN_MAX)
 						{
-								// 读取传送来的数据
+								// Read the transmitted data.
 								dwt_readrxdata(rx_buffer, frame_len, 0);
-								// 将传送来的数据转为消息格式
+								// Convert the transmitted data into message format.
 								msg_f_recv = (srd_msg_dsss*)rx_buffer;
 								
 						}
@@ -200,18 +200,18 @@ int dw_main(void)
 						if ('A' == msg_f_recv->messageData[0])
 						{
 							
-								// 读取Poll发送时间和Resp接收时间
+								// Read the Poll transmission time and the Resp reception time.
 								poll_tx_ts = get_tx_timestamp_u64();
 								resp_rx_ts = get_rx_timestamp_u64();
 							
-								// 设置Final 延迟发送时间
+								// Set the final delayed sending time.
 								final_tx_time = (resp_rx_ts + ((RESP_RX_TO_FINAL_TX_DLY_UUS) * UUS_TO_DWT_TIME)) >> 8;
 							
 								dwt_setdelayedtrxtime(final_tx_time);
 							
 								final_tx_ts = (((uint64)(final_tx_time & 0xFFFFFFFEUL)) << 8) + TX_ANT_DLY;
 							
-								// 设置Final 发送数据
+								// Configure Final Data Transmission
 								msg_f_send.messageData[0]='F';//Final message
 								final_msg_set_ts(&msg_f_send.messageData[FINAL_MSG_POLL_TX_TS_IDX], poll_tx_ts);
 								final_msg_set_ts(&msg_f_send.messageData[FINAL_MSG_RESP_RX_TS_IDX], resp_rx_ts);
@@ -220,7 +220,7 @@ int dw_main(void)
 							
 								dwt_writetxdata(9+17, (uint8 *)&msg_f_send, 0) ; // write the frame data
 								dwt_writetxfctrl(9+17, 0);
-								// 延迟发送
+								// Delayed sending
 							
 								//cur_ts = get_cur_timestamp_u64();
 
@@ -238,7 +238,7 @@ int dw_main(void)
 														
 										for (int i = 0; i < CIR_LENGTH*4; i++)
 										{
-											// 需要使用FP的CIR
+											// Requires the use of the FP's CIR.
 											msg_f_send.messageData[FINAL_MSG_POLL_TX_TS_IDX+i] = cir_buffer1[i+5];
 										}
 										
@@ -280,7 +280,7 @@ int dw_main(void)
 //												//HalDelay_nMs();
 //										}
 										
-										//Sequence Num自增
+										//Increment Sequence Num
 										if(distance_seqnum == 254)
 										{
 											distance_seqnum = 0;
@@ -312,7 +312,8 @@ int dw_main(void)
    return 0;
 }
 
-#else
+//#else
+#endif
 
 #ifdef RX_NODE
 
@@ -321,7 +322,7 @@ static double tof;
 static double distance;
 
 
-//定义保存时间戳
+//Define the save timestamp.
 static uint32 poll_tx_ts, resp_rx_ts, final_tx_ts;
 static uint32 poll_rx_ts_32, resp_tx_ts_32, final_rx_ts_32;
 
@@ -333,8 +334,8 @@ static uint64 final2_rx_ts;
 
 static double Ra, Rb, Da, Db;
 static int64 tof_dtu;
-static int temp  = 0;//保存临时变量
-static float uwb_rssi = 0;//定义保存RSSI信号强度的变量
+static int temp  = 0;//Save temporary variable
+static float uwb_rssi = 0;//Define a variable to store the RSSI signal strength.
 	
 static int n = 0;
 
@@ -350,43 +351,43 @@ int dw_main(void)
 		//RX_ANT_DLY = rfDelaysTREK[1];
 	  //TX_ANT_DLY = rfDelaysTREK[1];
 	
-		// 修改为我们自己的代码
+		// Modify it to use our own code.
 		reset_DW1000();
 	
 		SPI_ConfigFastRate(SPI_BaudRatePrescaler_32);
 	
-		// 初始化DW1000
+		// Initialize the DW1000
 		if(dwt_initialise(DWT_LOADUCODE) == DWT_ERROR)
 		{
 			while(1){};
 		}
 		
-		// 读取晶振校准参数
+		// Read crystal oscillator calibration parameters.
 		// dwt_xtaltrim(uCurrentTrim_val);
 
 		// dwt_readfromdevice(FS_CTRL_ID,FS_XTALT_OFFSET,1,&uCurrentTrim_val);
 		// uCurrentTrim_val &= 31;
 		
-		// 将SPI调整至18MHz
+		// Adjust the SPI to 18 MHz.
 		SPI_ConfigFastRate(SPI_BaudRatePrescaler_4);
 		
-		// 配置工作频率
+		// Configure the operating frequency
 		// config.txCode = 7 + addr;
 		// config.rxCode = 7 + addr;		
 		dwt_configure(&config);
-		// 启动DW1000状态指示灯
+		// Activate the DW1000 status indicator.
 		dwt_setleds(1);
-		// 配置发送功率
+		// Configure transmit power
 		dwt_configuretxrf(&txconfig2);
-		// 设置工作网络ID
+		// Set Work Network ID
 		dwt_setpanid(NET_PANID);
-		// 设置自身短地址
+		// Set own short address
 		dwt_setaddress16(addr);
-		// 配置天线延迟
+		// Configure antenna delay
 		dwt_setrxaftertxdelay(RX_ANT_DLY);
 		dwt_settxantennadelay(TX_ANT_DLY);
 		
-		// 设置DW1000中断，虽然并没有用到
+		// Configuring the DW1000 interrupt, although it is not actually used.
 		dwt_setinterrupt(DWT_INT_RFCG | (DWT_INT_ARFE | DWT_INT_RFSL | DWT_INT_SFDT | DWT_INT_RPHE | DWT_INT_RFCE | DWT_INT_RFTO /*| DWT_INT_RXPTO*/), 1);
 		
 		BPhero_UWB_Message_Init();	
@@ -401,37 +402,37 @@ int dw_main(void)
 		while(1)
 		{
 		
-			//启动接收
-			//Step1:启动帧过滤功能 --> 只接收数据包，更多帧过滤功能相关内容可以参考51uwb.cn
+			//Start receiving
+			//Step1:Enable frame filtering --> Receive data packets only; for more information on frame filtering features, please refer to 51uwb.cn.
 			//dwt_enableframefilter(DWT_FF_DATA_EN);
-			//Step2:设定接收延时，timeout参数为0表示一直处于接收状态
+			//Step2:Set the reception timeout; a timeout parameter of 0 indicates that the system remains in the receiving state indefinitely.
 			dwt_setrxtimeout(1000);
 			dwt_setpreambledetecttimeout(0);
-			//Step3:立刻启动接收，这个函数里的参数可以设置延时接收，可以优化，让接收机过段时间启动，减少能量损耗
+			//Step3:Initiate reception immediately. The parameters of this function allow for a delayed start to reception; this can be optimized by delaying the receiver's activation to reduce energy consumption.
 			dwt_rxenable(DWT_START_TX_IMMEDIATE);
 			
 			while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_ERR)))
 			{ };
 			
-			//判断是否有完整数据接收完毕
+			//Determine whether the complete data has been received.
 			if (status_reg & SYS_STATUS_RXFCG)
 			{
 					if (err_cnt > 0)
 					{
 							err_cnt=0;
 					}
-					//读取接收到的数据长度
+					//Read the length of the received data.
 					frame_len = dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
 				
 					dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG);
 				
-					//如果数据长度小于最大值，认为是合理的
+					//If the data length is less than the maximum value, it is considered reasonable.
 					if (frame_len <= FRAME_LEN_MAX)
 					{
 
-							//读取接收到的数据
+							//Read the received data.
 							dwt_readrxdata(rx_buffer, frame_len, 0);
-							//将数据强制转换成约定格式
+							//Force the data into the agreed-upon format.
 							msg_f = (srd_msg_dsss*)rx_buffer;
 						
 							if ((msg_f->destAddr[0] != msg_f_send.sourceAddr[0]) || (msg_f->destAddr[1] != msg_f_send.sourceAddr[1]))
@@ -439,11 +440,11 @@ int dw_main(void)
 									continue;
 							}
 							
-							//提取发送该数据的短地址，并赋值到将要发送信息的目标地址
-							//哪里来的信息，后面回复给谁
+							//Extract the short address used to send this data and assign it to the destination address for the message to be sent.
+							//Where did the information come from, and who should the reply be sent to?
 							msg_f_send.destAddr[0] = msg_f->sourceAddr[0];
 							msg_f_send.destAddr[1] = msg_f->sourceAddr[1];
-							//提取sequence Num
+							//Extract sequence number
 							msg_f_send.seqNum = msg_f->seqNum;
 						
 							uint16 fp_int1 = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
@@ -469,7 +470,7 @@ int dw_main(void)
 									uint32 resp_tx_time;
 									int ret;
 
-									//保存接收到这个信息的时间戳
+									//Save the timestamp of when this message was received.
 									poll_rx_ts = get_rx_timestamp_u64();
 								
 									resp_tx_time = (poll_rx_ts + ((POLL_RX_TO_RESP_TX_DLY_UUS) * UUS_TO_DWT_TIME)) >> 8;
@@ -480,18 +481,18 @@ int dw_main(void)
 							
 
 									msg_f_send.messageData[0]='A';//Poll ack message
-									//将上次测距信息打包发送
+									//Package and send the previous ranging information.
 									temp = (int)(distance*100);//convert m to cm
 									msg_f_send.messageData[1]=temp/100;
 									msg_f_send.messageData[2]=temp%100;
-									//将要发送的数据写入到UWB寄存器内
+									//Write the data to be sent into the UWB registers.
 									dwt_writetxdata(psduLength +3 , (uint8 *)&msg_f_send, 0) ; // write the frame data
-									//告知UWB发送数据偏移为0
+									//Indicate that the UWB data transmission offset is 0.
 									dwt_writetxfctrl(psduLength +3, 0);
 								
-									//启动立即发送
+									//Send immediately upon startup
 									ret = dwt_starttx(DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED);
-									//等待发送完成
+									//Waiting for transmission to complete
 																						
 									//uint16 fp_int1 = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
 									dwt_readaccdata(cir_buffer1, CIR_LENGTH*4, (fp_int1)*4);
@@ -511,16 +512,16 @@ int dw_main(void)
 											if (frame_len <= FRAME_LEN_MAX)
 											{
 										
-												//读取接收到的数据
+												//Read the received data.
 												dwt_readrxdata(rx_buffer, frame_len, 0);
-												//将数据强制转换成约定格式
+												//Force the data into the agreed-upon format.
 												msg_f = (srd_msg_dsss*)rx_buffer;
 												
-												//提取发送该数据的短地址，并赋值到将要发送信息的目标地址
-												//哪里来的信息，后面回复给谁
+												//Extract the short address used to send this data and assign it to the destination address for the message to be sent.
+												//Where did the information come from, and who should the reply be sent to?
 												msg_f_send.destAddr[0] = msg_f->sourceAddr[0];
 												msg_f_send.destAddr[1] = msg_f->sourceAddr[1];
-												//提取sequence Num
+												//Extract sequence number
 												// 80us
 												msg_f_send.seqNum = msg_f->seqNum;
 											
@@ -528,12 +529,12 @@ int dw_main(void)
 												if ('F' == msg_f->messageData[0])
 												{
 														//printf("Receive Final\r");
-														//保存发送A信息的时间戳
+														//Save the timestamp of sending message A.
 														resp_tx_ts = get_tx_timestamp_u64();
-														//保存接收‘F'信息的时间戳
+														//Save the timestamp of receiving the 'F' message.
 														final_rx_ts = get_rx_timestamp_u64();
 													
-														//提取数据包载荷中时间戳信息
+														//Extract timestamp information from the data packet payload.
 														// 50us
 														final_msg_get_ts(&msg_f->messageData[FINAL_MSG_POLL_TX_TS_IDX], &poll_tx_ts);
 														final_msg_get_ts(&msg_f->messageData[FINAL_MSG_RESP_RX_TS_IDX], &resp_rx_ts);
@@ -572,16 +573,16 @@ int dw_main(void)
 															
 																if (frame_len <= FRAME_LEN_MAX)
 																{
-																		//读取接收到的数据
+																		//Read the received data.
 																		dwt_readrxdata(rx_buffer, frame_len, 0);
 																	
-																		//将数据强制转换成约定格式
+																		//Force the data into the agreed-upon format.
 																		msg_f = (srd_msg_dsss*)rx_buffer;
-																		//提取发送该数据的短地址，并赋值到将要发送信息的目标地址
-																		//哪里来的信息，后面回复给谁
+																		//Extract the short address used to send this data and assign it to the destination address for the message to be sent.
+																		//Where did the information come from, and who should the reply be sent to?
 																		msg_f_send.destAddr[0] = msg_f->sourceAddr[0];
 																		msg_f_send.destAddr[1] = msg_f->sourceAddr[1];
-																		//提取sequence Num
+																		//Extract sequence number
 																		msg_f_send.seqNum = msg_f->seqNum;
 																	
 																		if ('X' == msg_f->messageData[0])
@@ -597,7 +598,7 @@ int dw_main(void)
 																				uint16 fp_int4 = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET);
 																				dwt_readaccdata(cir_buffer4, CIR_LENGTH*4, ((fp_int4>>6))*4);
 																				
-																				//根据TWR算法计算距离，这个部分可以参考51uwb.cn的视频讲解说明
+																				//For distance calculation based on the TWR algorithm, you can refer to the video tutorial on 51uwb.cn.
 																				poll_rx_ts_32 = (uint32)poll_rx_ts;
 																				resp_tx_ts_32 = (uint32)resp_tx_ts;
 																				final_rx_ts_32 = (uint32)final_rx_ts;
@@ -609,9 +610,9 @@ int dw_main(void)
 
 																				tof = tof_dtu * DWT_TIME_UNITS;
 																				distance = tof * SPEED_OF_LIGHT;
-																				//官方给出偏移校正，用户可以适当根据环境调整偏移表格数据
-																				//distance = distance - dwt_getrangebias(config.chan,(float)distance, config.prf);//距离减去矫正系数
-																				//对计算的距离进行卡尔曼滤波
+																				//The official documentation provides offset correction data, allowing users to adjust the offset table values ​​as appropriate based on the environment.
+																				//distance = distance - dwt_getrangebias(config.chan,(float)distance, config.prf);//Distance minus correction factor
+																				//Apply Kalman filtering to the calculated distance.
 																				//kalman filter
 																				//distance = KalMan(distance);
 																				
@@ -663,7 +664,7 @@ int dw_main(void)
 //																						}
 //																				}
 												
-																				//将距离信息发送到串口
+																				//Send distance information to the serial port.
 																				//printf("0x%04X <--> 0x%02X%02X :%d cm\r\n",SHORT_ADDR,msg_f_send.destAddr[1],msg_f_send.destAddr[0],(int)(100*distance));
 																				temp = (int)(distance*100);
 
@@ -773,4 +774,4 @@ int dw_main(void)
 
 
 
-#endif
+//#endif

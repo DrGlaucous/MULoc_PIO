@@ -9,7 +9,7 @@
 
 // Device configuration
 #define RX_NODE
-//#define TX_NODE
+#define TX_NODE
 
 #ifdef RX_NODE
 #define SHORT_ADDR 0x0002
