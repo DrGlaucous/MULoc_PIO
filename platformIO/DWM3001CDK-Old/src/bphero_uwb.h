@@ -1,0 +1,111 @@
+#pragma once
+
+#include <Arduino.h>
+#include "dw3000.h"
+#include "dw3000_regs.h"
+#include "dw3000_shared_defines.h"
+
+#include "frame_header.h"
+#include "common_header.h"
+
+
+// Device configuration
+#define RX_NODE
+#define TX_NODE
+
+#ifdef RX_NODE
+#define SHORT_ADDR 0x0002
+#endif
+
+#ifdef TX_NODE
+#define SHORT_ADDR 0x0001
+#define LCD_ENABLE
+#endif
+
+// Anchor configuration
+// Number of anchors used in the system
+#define ANCHOR_NUM 4
+// Anchor ID of the current anchor
+#define ANCHOR_ID 3
+
+#define ANCHOR_LISTEN 0
+#define ANCHOR_SEND 2
+
+#define RX_ANT_DLY 0
+#define TX_ANT_DLY 32880
+
+
+/* Payload format (CIR and receiving timestamps of messages from other anchors)
+
+|---CIR(4 byte)---|--RxTime(5 byte)--|******|---CIR(4 byte)---|--RxTime(5 byte)--|-IDX(1 byte)-|
+|---------------------------13 byte * (Anchor Number-1)--------------------------|----1 byte---| 
+*/
+
+//13 bytes total
+//[2 bytes ][2 bytes][1 byte          ][1 byte               ][2 bytes       ][5 bytes]
+//[CIR real][CIR img][phase correction][preamble accumulation][max growth cir][rx time]
+
+//DW3000: 21 bytes total
+//[4 bytes ][4 bytes][2 byte          ][2 byte               ][4 bytes       ][5 bytes]
+//[CIR real][CIR img][phase correction][preamble accumulation][max growth cir][rx time]
+
+//length of a single set of data from an anchor
+#define SINGLE_LEN 13
+
+
+#define POA_LEN 4
+
+#define END_LEN 0
+
+/* Length of the common part of the message (up to and including the function code, see NOTE 2 below). */
+//the prefix header present on all messages (index 8 is used as the anchor id)
+//the header is: msg_common[] = {0x41, 0x88, 0, 0xCA, 0xDE, 'W', 'A', 'V', 'E', 0x21};
+#define ALL_MSG_COMMON_LEN 10
+
+/* Indexes to access some of the fields in the frames defined above. */
+
+//all message sequence index (where the frame is in the TWR sequence)
+#define ALL_MSG_SN_IDX 2
+
+#define SENDING_TX_TS_IDX 10
+
+
+
+/* Delay between frames, in UWB microseconds. */
+#define DELAY_TIME 600
+#define DELAY_TIME_TURN 600
+#define RX_AFTER_TX_DELAY 450
+#define RX_TIMEOUT 2500
+
+/* Length of channel impulse response to read from the accumulator buffer*/
+//each complex/real value is 3 bytes long (6 for the whole number). Maybe that's why it's like this?
+//Ans: no, with the DW1000, each complex value is 2+2 bytes long. I think this just means we want 3 of these.
+#define CIR_LEN 3
+
+#define NET_PANID 0xF0F2
+
+extern int psduLength ;
+extern srd_msg_dsss msg_f_send ;
+extern srd_msg_dsss msg_f_send2 ;
+
+#ifndef SPEED_OF_LIGHT
+#define SPEED_OF_LIGHT      (299702547.0)  // in m/s in air
+#endif
+
+#ifndef FRAME_LEN_MAX
+#define FRAME_LEN_MAX 127
+#endif
+
+/* UWB microsecond (uus) to device time unit (dtu, around 15.65 ps) conversion factor.
+ * 1 uus = 512 / 499.2 ? and 1 ? = 499.2 * 128 dtu. */
+#define UUS_TO_DWT_TIME 65536
+
+#define PRE_TIMEOUT 0
+
+extern uint8_t rx_buffer[FRAME_LEN_MAX];
+extern uint32_t status_reg;
+extern uint16_t frame_len ;
+extern void BPhero_UWB_Message_Init(void);
+extern float dwGetReceivePower(void);
+
+extern dwt_config_t config;
