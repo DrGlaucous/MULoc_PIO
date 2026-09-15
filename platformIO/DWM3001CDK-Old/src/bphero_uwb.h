@@ -86,7 +86,7 @@
 
 extern int psduLength ;
 extern srd_msg_dsss msg_f_send ;
-extern srd_msg_dsss msg_f_send2 ;
+//extern srd_msg_dsss msg_f_send2 ;
 
 #ifndef SPEED_OF_LIGHT
 #define SPEED_OF_LIGHT      (299702547.0)  // in m/s in air
@@ -101,11 +101,3 @@ extern srd_msg_dsss msg_f_send2 ;
 #define UUS_TO_DWT_TIME 65536
 
 #define PRE_TIMEOUT 0
-
-extern uint8_t rx_buffer[FRAME_LEN_MAX];
-extern uint32_t status_reg;
-extern uint16_t frame_len ;
-extern void BPhero_UWB_Message_Init(void);
-extern float dwGetReceivePower(void);
-
-extern dwt_config_t config;

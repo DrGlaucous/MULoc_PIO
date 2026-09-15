@@ -1,18 +1,150 @@
-#include <vector>
+/*! ----------------------------------------------------------------------------
+ *  @file    main.c
+ *  @brief   main loop for the DecaRanging application
+ *
+ * @attention
+ *
+ * Copyright 2015 (c) DecaWave Ltd, Dublin, Ireland.
+ *
+ * All rights reserved.
+ *
+ * @author DecaWave
+ */
+
 #include <Arduino.h>
-#include "constants.h"
 #include "dw3000.h"
 #include "dw3000_regs.h"
 #include "dw3000_shared_defines.h"
-//#include "dw3000_device_api.h"
+
+#include "bphero_uwb.h"
 #include "SPI.h"
-#include "packet.h"
+
+//extern void usb_run(void);
+//extern int usb_init(void);
+
+
+
+///////////////////////////////////Constants
+
+#define BAUD_RATE 460800
+
+#define LED_D9 4
+#define LED_D10 5
+#define LED_D11 22
+#define LED_D12 14
+
+//onboard pushbuttons for the DWM3001CDK
+#define SWITCH_1 18
+#define SWITCH_2 2
+
+//adding 32 gives us pin bank 2.
+#define SPI_CS 32 + 6
+#define SPI_CLK 3
+#define SPI_MOSI 8
+#define SPI_MISO 29
+
+//other radio control pins
+#define DW_RST 25
+#define DW_IRQ 32 + 2
+#define DW_WUP 32 + 19
+
+
+
+
+/**
+**===========================================================================
+**
+**  Abstract: main program
+**
+**===========================================================================
+*/
+
+static int ret;
+
+static uint32_t status_reg = 0;
+
+static uint8_t distance_seqnum;
+static srd_msg_dsss *msg_f_recv;
+
+// static uint16_t RX_ANT_DLY;
+// #static uint16_t TX_ANT_DLY;
+
+#define RX_ANT_DLY 0
+#define TX_ANT_DLY 32880
+
+#define CIR_LENGTH 3
+#define LCD_BUFF_LEN (500)
+
+static dwt_rxdiag_t rx_diag1;
+static uint8_t usbVCOMout[LCD_BUFF_LEN * 8];
+
+static uint8_t cir_buffer1[4 * CIR_LENGTH + 1];
+static uint8_t cir_buffer2[4 * CIR_LENGTH + 1];
+static uint8_t cir_buffer3[4 * CIR_LENGTH + 1];
+static uint8_t cir_buffer4[4 * CIR_LENGTH + 1];
+
+
+//extern dwt_config_t config2;
+//extern dwt_txconfig_t txconfig2;
+//extern uint16_t rfDelaysTREK[2];
+
+struct cir_tap_struct
+{
+	uint16_t real;
+	uint16_t imag;
+};
+
+// int App_Module_Uart_USB_Send(uint8_t *buf, uint16_t len)
+// {
+// 		int ret = 0;
+// 		char send_buf[2000];
+// 		memset(send_buf,0, sizeof(send_buf));
+// 		memcpy(send_buf, buf, len);
+// 		USART1_SendBuffer(send_buf, len, true);
+// 		//HalUsbWrite(send_buf, len);
+// 		return ret;
+// }
 
 
 DummyStream* dummy = nullptr;
 DWUart* uart = nullptr;
 DW3000Port* port = nullptr;
 DW3000* radio = nullptr;
+
+
+int psduLength = 0;
+srd_msg_dsss msg_f_send;
+//srd_msg_dsss msg_f_send2;
+
+uint8_t rx_buffer[FRAME_LEN_MAX];
+//uint32_t status_reg = 0;
+//uint16_t frame_len = 0;
+
+//I can only guess what this method does
+void BPhero_UWB_Message_Init() {
+    memset(&msg_f_send, 0, sizeof(msg_f_send));
+}
+
+
+
+
+
+
+
+// #pragma GCC optimize ("O3")
+#ifdef TX_NODE
+
+static uint64_t poll_tx_ts;
+static uint64_t cur_ts;
+static uint64_t resp_rx_ts;
+static uint64_t final_tx_ts;
+
+static uint32_t final_tx_time;
+static uint32_t final2_tx_time;
+
+static int Final_Distance = 0;
+
+static uint8_t board_num = 3;
 
 
 
@@ -62,623 +194,24 @@ dwt_txconfig_t txconfig_ch9 = {
 };
 
 
-/////////////////////helper functions
 
-//platform specific code, this will need to be changed for non-NRF devices!
-//MAC address should be hard-coded into each device
-uint64_t get_uuid() {
 
-	//collect both halves of the unique device ID
-	uint64_t lsb = (uint64_t)NRF_FICR->DEVICEID[0];
-	uint64_t msb = (uint64_t)NRF_FICR->DEVICEID[1];
 
-	//merge them together and return them as one chunk
-	return (msb << 32) | lsb;
-}
 
-//prints a u64, since the arduino IDE's serial.print doesn't handle this
-void print_u64(uint64_t value, int base) {
-	Serial.print((uint32_t)(value >> 32), base);
-	Serial.print((uint32_t)(value & 0xFFFFFFFF), base);
-}
 
-//writes a UWBPacket out to the radio and waits for it to respond with the send status
-//see: dwt_starttx to understand what modes are valid
-bool send_packet(UWBPacket& packet, uint8_t mode) {
-	
-	//write actual data to the outgoing buffer, automatically accounts for >127 packet sizes
-	radio->dwt_writetxdata(packet.get_compiled_len(), packet.get_compiled(), 0);
-
-	//append FC data (2 byte checksum), identify this packet as a ranging packet
-	radio->dwt_writetxfctrl(packet.get_compiled_len() + FCS_LEN, 0, 1);
-
-	//start TX mode
-	int first_send_error = radio->dwt_starttx(mode);
-
-	//happens if the delayed time has passed, it puts the radio into off mode
-	if(first_send_error != DWT_SUCCESS) {
-		//Serial.print("Delay send error: ");
-		//Serial.println(first_send_error);
-		return false;
-	}
-
-	//check for a successful transmit with timeout
-	bool send_error = true;
-	
-    //tx visual debug: blink LED while waiting for the frame to go out
-	pinMode(14, OUTPUT);
-	digitalWrite(14, false);
-
-    while(1) {
-		if(radio->check_frame_tx_success()) {
-			send_error = false;
-			break;
-		}
-	}
-
-    digitalWrite(14, true);
-
-	//had problem sending packet, reset radio status and return
-	if(send_error) {
-		radio->clear_system_status();
-		radio->dwt_writefastCMD(CMD_TXRXOFF);
-		//Serial.println("Send Error");
-		return false;
-	}
-
-	return true;
-
-}
-
-//reads the last gotten data as a UWB packet out of the radio's internal buffer
-UWBPacket get_packet() {
-
-
-	//parse the packet to get the timestamps from the other radio
-	//get size of frame and read it in (minus CRC)
-	uint32_t frame_length = radio->get_frame_length() - FCS_LEN;
-	uint8_t frame_data[frame_length] = {};
-	radio->dwt_readrxdata(frame_data, frame_length, 0);
-	return UWBPacket(frame_data, frame_length);
-
-}
-
-
-//check for gotten frame, returns 0 on nothing, 1 on success, 2 on bad checksum, 3 on error
-int clone_check_for_rx() {
-
-    //get current status
-    int sys_stat = radio->dwt_read32bitreg(SYS_STATUS_ID);
-    
-    //got packet
-    if((sys_stat & SYS_STATUS_RXFCG_BIT_MASK) > 0) {
-        return 1;
-    }
-    //got packet (bad checksum, if we got a good checksum, both this bit and the one above is set. Otherwise, only this bit will be set.)
-    else if ((sys_stat & SYS_STATUS_RXFR_BIT_MASK) > 0) {
-        return 2;
-    } 
-    //got error
-    else if ((sys_stat & SYS_STATUS_ALL_RX_ERR) > 0) {
-        return 3;
-    }
-    return 0;
-
-    //in checking for RX errors, the simple library used:
-    //(1 << 26)     RXSTO yes
-    //(1 << 21)     RXPTO no (preamble detection timeout)
-    //(1 << 18)     CIAERR yes
-    //(1 << 17)     RXFTO no (Receive Frame Wait Timeout)
-    //(1 << 16)     RXFSL yes
-    //(1 << 15)     RXFCE yes     (rxfcg is not included here)
-    //(1 << 12)     RXPHE yes
-    //#define SYS_STATUS_RX_ERR 0x4279000
-
-    //the rx example for the makerfabs library used:
-    //SYS_STATUS_RXFCG_BIT_MASK no
-    //SYS_STATUS_RXPHE_BIT_MASK yes
-    //SYS_STATUS_RXFCE_BIT_MASK yes
-    //SYS_STATUS_RXFSL_BIT_MASK yes
-    //SYS_STATUS_RXSTO_BIT_MASK yes
-    //SYS_STATUS_ARFE_BIT_MASK no (automatic frame filtering rejection)
-    //SYS_STATUS_CIAERR_BIT_MASK yes
-
-}
-
-//blocks until the radio gets a message in or until timeout_ms is reached.
-//we can also wait for timeout using dwt_setrxtimeout...
-//the radio must already be set to the correct mode with a fast command!
-//returns 0 on timeout, 1 on success, 2 on bad checksum, 3 on general error
-int wait_for_message_with_timeout(uint32_t timeout_ms, bool no_timeout = false) {
-
-
-	auto tx_time = millis();
-	while(no_timeout || (millis() - tx_time < timeout_ms)) {
-		auto response = radio->check_for_rx();
-        if(response) {
-            return response;
-        }
-
-	}
-
-	return 0;
-
-
-}
-
-
-
-//set the radio's output channel
-void set_channel_config(bool is_freq_5) {
-    radio->dwt_forcetrxoff();
-    if(is_freq_5) {
-        //Serial.print("CHN: 5 ");
-        //Serial.print(" ");
-
-        while(radio->dwt_configure(&config_ch5) != DWT_SUCCESS);
-        radio->dwt_configuretxrf(&txconfig_ch5); 
-    } else {
-        //Serial.print("CHN: 9 ");
-        //Serial.print(" ");
-
-        while(radio->dwt_configure(&config_ch9) != DWT_SUCCESS);
-        radio->dwt_configuretxrf(&txconfig_ch9);
-    }
-    //force it to log important telemetry
-    radio->dwt_configciadiag(DW_CIA_DIAG_LOG_ALL);
-}
-
-//set the time at which the next transaction should happen
-//takes the time in microseconds until the next transaction, returns it in radio units
-uint64_t set_outgoing_time(uint64_t turnaround_time_micros, uint64_t rx_time_radio) {
-    
-    //convert micros to DWT tome and add it to the radio time, then shift it into the delay time register since that one chops off the LSByte
-    uint64_t tx_timestamp = ((turnaround_time_micros * UUS_TO_DWT_TIME + rx_time_radio) >> 8) & 0xFFFFFFFEUL;
-    radio->dwt_setdelayedtrxtime((uint32_t)tx_timestamp);
-
-    //make units the same as radio->get_rx_timestamp_u64
-    return (tx_timestamp << 8) + TX_ANT_DELAY;
-}
-
-
-//converts an unsigned 24 bit integer into a signed one, mainly used by CIR stuff
-int32_t convert_u24_to_i24(uint32_t raw_24bit) {
-    // Mask to ensure we only have 24 bits of data
-    raw_24bit &= 0x00FFFFFF; 
-
-    //if the 24th bit (0x800000) is set, it's negative
-    if (raw_24bit & 0x00800000) {
-        return static_cast<int32_t>(raw_24bit | 0xFF000000); //sign extend
-    }
-    
-    return static_cast<int32_t>(raw_24bit);
-}
-
-
-////////////////////main methods
-
-
-
-bool flip = false;
-//initiator, does not do the final calculations
-//loop_ds_init
-void loop_ds_tag() {
-
-
-	//start with clean slate
-	radio->clear_system_status();
-	radio->dwt_writefastCMD(CMD_TXRXOFF);
-
-	//make starting packet to send (doesn't have to be a TWR packet to start with)
-	auto payload = RangingPacket(0, 0, RangingFrameNum::Request, 0, 0, 0);
-	UWBPacket packet = UWBPacket(
-		get_uuid(), //this device's mac
-		UWBPacket::BROADCAST_MAC,
-		PacketType::Ranging,
-		payload.get_compiled(),
-		payload.get_compiled_len()
-	);
-
-	if(!send_packet(packet, DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED)) {
-		//failed to send, restart loop
-		Serial.println("Failed to send initial packet.");
-		delay(1000);
-		return;
-	}
-
-	//wait for RX
-	auto rx_status = wait_for_message_with_timeout(1000);
-	if(rx_status != 1) {
-		Serial.print("RX Error: ");
-		Serial.println(rx_status);
-		return;
-	}
-
-
-	//parse the packet to get the timestamps from the other radio
-	//UWBPacket response_packet = get_packet();
-
-	//timestamp when the initial packet was sent by us
-	uint64_t initial_tx_timestamp = radio->get_tx_timestamp_u64();
-
-	//timestamp when the response was got by us
-	uint64_t rx_timestamp = radio->get_rx_timestamp_u64();
-
-	//full round trip 
-	uint64_t round_1_time = rx_timestamp - initial_tx_timestamp;
-
-	//read CIR
-	uint32_t cir_real = 0;
-	uint32_t cir_img = 0;
-	{
-		dwt_rxdiag_t diagnostics = {};
-        radio->dwt_readdiagnostics(&diagnostics);
-
-		uint16_t fp_index = diagnostics.ipatovFpIndex >> 6; //bit shifting removes the fractional part
-
-		uint8_t complex_byte_len = 6;
-		//extra 1 for the dummy leading byte we get when starting the read
-		uint8_t cir_buffer[complex_byte_len * CIR_LEN + 1] = {};
-		radio->dwt_readaccdata(cir_buffer, (complex_byte_len * CIR_LEN + 1), fp_index);
-
-		//the original code took the second entry of three in the CIR buffer
-		cir_real = 
-			  cir_buffer[1 + 1*complex_byte_len] //lo
-			| cir_buffer[1 + 1*complex_byte_len + 1] << 8 //mid
-			| cir_buffer[1 + 1*complex_byte_len + 2] << 16; //hi
-		cir_img = 
-			  cir_buffer[1 + 1*complex_byte_len + 3] //lo
-			| cir_buffer[1 + 1*complex_byte_len + 4] << 8 //mid
-			| cir_buffer[1 + 1*complex_byte_len + 5] << 16; //hi
-
-	}
-	
-
-	//calculate and populate outgoing time (see above for a breakdown)
-	uint32_t turnaround_time_us = 2000;
-	uint64_t tx_timestamp = set_outgoing_time(turnaround_time_us, rx_timestamp);
-	uint64_t reply_2_time = tx_timestamp - rx_timestamp;
-
-	//write packet
-	RangingPacket range_p = RangingPacket(reply_2_time, round_1_time, RangingFrameNum::Final, 0, cir_real, cir_img);
-	UWBPacket outgoing = UWBPacket(get_uuid(), UWBPacket::BROADCAST_MAC, PacketType::Ranging, range_p.get_compiled(), range_p.get_compiled_len());
-
-	//send with delay
-	if (!send_packet(outgoing, DWT_START_TX_DELAYED)) {
-		Serial.println("Send result not successful");
-		return;
-	}
-
-
-
-	//if we set turnaround_time_us to 2 ms, then this will only work down to 2 ms, if we set it to 1 ms, then this will work spotty down to 1 ms...
-	//why?
-	delay(3);
-	//radio->dwt_writefastCMD(CMD_TXRXOFF);
-	radio->clear_system_status();
-
-	//send the second post-final packet (content doesn't really matter, the anchor needs another point to extract CFO from)
-	uint64_t post_final_tx_time = set_outgoing_time(4000, tx_timestamp);
-	uint64_t reply_3_time = post_final_tx_time - tx_timestamp;
-	RangingPacket range_pfinal = RangingPacket(reply_3_time, 0, RangingFrameNum::PostFinal, 0, 0, 0);
-	outgoing = UWBPacket(get_uuid(), UWBPacket::BROADCAST_MAC, PacketType::Ranging, range_pfinal.get_compiled(), range_pfinal.get_compiled_len());
-
-
-	//send with delay
-	if (!send_packet(outgoing, DWT_START_TX_DELAYED)) {
-		Serial.println("Send result not successful");
-		return;
-	}
-
-
-	Serial.println("Sent ranging response");
-
-
-	//debug: flip LED
-	flip = !flip;
-	radio->gpio_set(2, flip);
-	radio->gpio_set(3, !flip);
-
-	delay(10);
-
-
-
-
-}
-
-//responder, makes the final calculations
-//loop_ds_resp
-void loop_ds_anchor() {
-
-
-	//clean slate
-	radio->clear_system_status();
-	radio->dwt_writefastCMD(CMD_TXRXOFF);
-
-	//start listening
-	radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
-
-	//wait for initial message
-	int result = wait_for_message_with_timeout(0, true);
-
-	//failed to properly get packet
-	if(result != 1) {
-		Serial.print("Error getting packet: ");
-		Serial.println(result);
-		return;
-	}
-
-
-	//we don't need to parse the packet, but if we did, that happens here.
-	// {
-	// 	auto pt = get_packet();
-	// 	if(pt.get_packet_type() == PacketType::Ranging) {
-	// 		auto rr = RangingPacket(pt.get_compiled());
-	// 		if(rr.get_frame_no() == RangingFrameNum::Request) {
-	// 			Serial.println("Got Initiator");
-	// 		} else {
-	// 			Serial.println(rr.get_frame_no());
-	// 		}
-	// 	}
-	// }
-
-	//read CIR
-	uint32_t cir_real = 0;
-	uint32_t cir_img = 0;
-	{
-		dwt_rxdiag_t diagnostics = {};
-        radio->dwt_readdiagnostics(&diagnostics);
-
-		uint16_t fp_index = diagnostics.ipatovFpIndex >> 6; //bit shifting removes the fractional part
-
-		uint8_t complex_byte_len = 6;
-		//extra 1 for the dummy leading byte we get when starting the read
-		uint8_t cir_buffer[complex_byte_len * CIR_LEN + 1] = {};
-		radio->dwt_readaccdata(cir_buffer, (complex_byte_len * CIR_LEN + 1), fp_index);
-
-		//the original code took the second entry of three in the CIR buffer
-		cir_real =
-			  cir_buffer[1 + 1*complex_byte_len] //lo
-			| cir_buffer[1 + 1*complex_byte_len + 1] << 8 //mid
-			| cir_buffer[1 + 1*complex_byte_len + 2] << 16; //hi
-		cir_img =
-			  cir_buffer[1 + 1*complex_byte_len + 3] //lo
-			| cir_buffer[1 + 1*complex_byte_len + 4] << 8 //mid
-			| cir_buffer[1 + 1*complex_byte_len + 5] << 16; //hi
-
-
-
-
-
-		//TEST: dump a sizeable portion of the CIR buffer to the serial terminal
-		if(0) {
-			//tests
-			const size_t debug_sample_size = 42;
-			float magnitude_bulk[debug_sample_size] = {};
-			float phase_bulk[debug_sample_size] = {};
-			uint8_t cir_buffer_bulk[complex_byte_len * debug_sample_size + 1] = {};
-			radio->dwt_readaccdata(cir_buffer_bulk, (complex_byte_len * debug_sample_size + 1), fp_index - (debug_sample_size / 2));
-
-			//convert those into complex numbers
-			for(size_t i = 0; i < debug_sample_size; ++i) {
-				uint32_t cir_real_2 =
-					cir_buffer_bulk[1 + i*complex_byte_len] //lo
-					| cir_buffer_bulk[1 + i*complex_byte_len + 1] << 8 //mid
-					| cir_buffer_bulk[1 + i*complex_byte_len + 2] << 16; //hi
-				uint32_t cir_img_2 =
-					cir_buffer_bulk[1 + i*complex_byte_len + 3] //lo
-					| cir_buffer_bulk[1 + i*complex_byte_len + 4] << 8 //mid
-					| cir_buffer_bulk[1 + i*complex_byte_len + 5] << 16; //hi
-
-				float ciri2 = (float)convert_u24_to_i24(cir_img_2);
-				float cirr2 = (float)convert_u24_to_i24(cir_real_2);
-
-				float phase = atan2(ciri2, cirr2);
-
-				float amplitude = sqrtf(ciri2 * ciri2 + cirr2 * cirr2);
-
-				magnitude_bulk[i] = amplitude;
-				phase_bulk[i] = phase;
-
-			}
-			for(size_t i = 0; i < debug_sample_size; ++i) {
-				Serial.print(magnitude_bulk[i]);
-				Serial.print(",");
-			}
-			Serial.println("");
-			for(size_t i = 0; i < debug_sample_size; ++i) {
-				Serial.print(phase_bulk[i]);
-				Serial.print(",");
-			}
-			Serial.println("");
-			Serial.println(fp_index);
-
-			return;
-
-		}
-
-	}
-	
-
-
-	//the time we got the packet
-	auto rx_timestamp = radio->get_rx_timestamp_u64();
-	//calculate and populate outgoing time (see above for a breakdown)
-	uint32_t turnaround_time_us = 3000;
-	uint64_t tx_timestamp = set_outgoing_time(turnaround_time_us, rx_timestamp);
-	uint64_t reply_1_time = tx_timestamp - rx_timestamp;
-
-
-	//write packet (content does not matter; the other radio will keep track of its own times)
-	auto payload = RangingPacket(0,0,RangingFrameNum::Response, 0, 0, 0);
-	UWBPacket packet = UWBPacket(
-		get_uuid(), //this device's mac
-		UWBPacket::BROADCAST_MAC,
-		PacketType::Ok,
-		payload.get_compiled(),
-		payload.get_compiled_len()
-	);
-
-	//send packet
-	if(!send_packet(packet, DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED)) {
-		Serial.println("Send result not successful");
-		return;
-	}
-
-	//Serial.println("Got initial packet and sent response.");
-	radio->clear_system_status();
-
-
-	//wait for RX
-	auto rx_status = wait_for_message_with_timeout(1000);
-	if(rx_status != 1) {
-		Serial.print("RX Error: ");
-		Serial.println(rx_status);
-		return;
-	}
-
-
-	//parse the packet to get the timestamps from the other radio
-	UWBPacket response_packet = get_packet();
-
-	uint32_t cir_remote_real = 0;
-	uint32_t cir_remote_img = 0;
-	double distance = 0.0;
-	switch(response_packet.get_packet_type()) {
-		case PacketType::Ranging: {
-			uint64_t round_2_time = radio->get_rx_timestamp_u64() - tx_timestamp;
-
-			auto ranging_data = RangingPacket(response_packet.get_payload());
-
-			uint64_t round_1_time = ranging_data.get_round_time();
-			uint64_t reply_2_time = ranging_data.get_reply_time();
-
-			//see page 249
-			double top_val = ((double)round_1_time * (double)round_2_time) - ((double)reply_1_time * (double)reply_2_time);
-			double bottom_val = ((double)round_1_time + (double)round_2_time + (double)reply_1_time + (double)reply_2_time);
-
-			double time_of_flight = ((double)top_val)/((double)bottom_val);
-			distance = time_of_flight * SPEED_OF_LIGHT * DWT_TIME_UNITS;
-
-			cir_remote_real = ranging_data.get_cir_real();
-			cir_remote_img = ranging_data.get_cir_imaginary();
-
-			// Serial.print("Rounds: ");
-			// print_u64(round_1_time);
-			// Serial.print(" ");
-			// print_u64(round_2_time);
-			// Serial.print(" Replies: ");
-			// print_u64(reply_1_time);
-			// Serial.print(" ");
-			// print_u64(reply_2_time);
-			// Serial.print(" ");
-
-			//Serial.print("Distance: ");
-			//Serial.println(distance);
-
-			break;
-		}
-		default: {
-			Serial.print("Wrong RX Packet type. Expected Ranging packet ");
-			Serial.println(response_packet.get_packet_type());
-
-			if(response_packet.get_packet_type() == 0) {
-				//debug: flip LED
-				flip = !flip;
-				radio->gpio_set(2, flip);
-				radio->gpio_set(3, !flip);
-			}
-
-			return;
-		}
-	}
-
-
-	// //get ready for another one
-	radio->clear_system_status();
-	radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
-
-
-	// //wait for post-final RX message
-	rx_status = wait_for_message_with_timeout(500);
-	if(rx_status != 1) {
-		Serial.print("RX Error: ");
-		Serial.println(rx_status);
-		return;
-	}
-
-	//print the distance we calculated if we got this last packet (as a sort-of sanity check to make sure we get the last packet correctly)
-	response_packet = get_packet();
-	if(response_packet.get_packet_type() == PacketType::Ranging) {
-		auto rs_packet = RangingPacket(response_packet.get_payload());
-
-		if(rs_packet.get_frame_no() == RangingFrameNum::PostFinal) {
-
-			//Serial.println(distance);
-
-
-			float tpi = 3.14159265358979f;
-
-			float cir_realf = (float)convert_u24_to_i24(cir_real);
-			float cir_imgf = (float)convert_u24_to_i24(cir_img);
-
-			float cir_remote_realf = (float)convert_u24_to_i24(cir_remote_real);
-			float cir_remote_imgf = (float)convert_u24_to_i24(cir_remote_img);
-
-			float remote_phase = atan2f(cir_remote_imgf, cir_remote_realf);
-			float remote_amplitude = sqrtf(cir_remote_imgf * cir_remote_imgf + cir_remote_realf * cir_remote_realf);
-
-			float phase = atan2(cir_imgf, cir_realf);
-			float amplitude = sqrtf(cir_imgf * cir_imgf + cir_realf * cir_realf);
-
-			float recovered_phase = remote_phase + phase;
-			// float recovered_phase = std::fmod(remote_phase + phase, tpi);
-			// if(recovered_phase < 0.) {
-			// 	recovered_phase += tpi;
-			// }
-
-			Serial.print(remote_phase),
-			Serial.print(",");
-			Serial.print(phase);
-			Serial.print(",");
-			Serial.println(recovered_phase);
-
-
-
-		}
-	}
-
-
-	//Serial.println(distance);
-
-
-}
-
-
-
-// -2*pi*freq*time_line_of_sight - 2*pi*carrier_freq_offset*tttt+(initial_offset)
-
-
-//starts SPI, Serial, and the DW3000
-void setup() {
+int dw_main(void)
+{
 	// sets up the device to use the pins on the bottom left of the rPi header for serial communication.
 	Serial = Uart(NRF_UART0, UARTE0_UART0_IRQn, 31, 7);
 	Serial.begin(BAUD_RATE);
 	Serial.println("Begin");
 
 
-
-
 	// sets up the SPI connection to the DW3000 radio
 	SPI = SPIClass(NRF_SPI2, SPI_MISO, SPI_CLK, SPI_MOSI);
 	SPI.begin();
 
-    //set up the backend components and feed them into the main DW3000 class
-	//uart = new DWUart(BAUD_RATE);
-    dummy = new DummyStream();
-    uart = new DWUart(*dummy);
-	port = new DW3000Port(&SPI, SPI_CS, DW_RST, DW_IRQ);
-	radio = new DW3000(uart, port);
+
 
     //hard reset
 	port->reset();
@@ -691,6 +224,10 @@ void setup() {
 		delay(1000);
 	}
 
+
+	//SPI_ConfigFastRate(SPI_BaudRatePrescaler_32);
+
+	// Initialize the DW1000
 	// uses DWT_LOADUCODE, which we don't have documentation for
 	if (radio->dwt_initialise(0) == DWT_ERROR)
 	{
@@ -701,58 +238,647 @@ void setup() {
 		};
 	}
 
-	//enabling LEDs 2 and 3 (visible on the eval board) to blink on RX and TX
-  	//radio->dwt_setleds(DWT_LEDS_ENABLE | DWT_LEDS_INIT_BLINK);
 
-    //manual LED control
-	radio->gpio_init_output();
+	//unsure if we need this for the DW3000.
+	radio->dwt_setxtaltrim(16);
 
-    //happens in the loop, don't need to do it here
-    //set up general radio configuration
-	// while (radio->dwt_configure(&config_ch5))
-	// {
-	// 	Serial.println("Config failed");
-	// 	delay(1000);
-	// }
-    // //set up radio transmission configuration
-    // radio->dwt_configuretxrf(&txconfig_ch5);
+	// Adjust the SPI to 18 MHz.
+	//SPI_ConfigFastRate(SPI_BaudRatePrescaler_4);
+	// Configure the operating frequency
 
-	set_channel_config(true);
+	//		config.txCode = 10;
+	//		config.rxCode = 10;
+	dwt_configure(&config);
+	// Activate the DW1000 status indicator.
+	dwt_setleds(1);
+	// Configure transmit power
+	dwt_configuretxrf(&txconfig2);
+	// Set Work Network ID
+	dwt_setpanid(NET_PANID);
+	// Set own short address
+	dwt_setaddress16(1);
+	// Configure antenna delay
+	dwt_setrxaftertxdelay(RX_ANT_DLY);
+	dwt_settxantennadelay(TX_ANT_DLY);
 
-    radio->dwt_setrxantennadelay(RX_ANT_DELAY);
-	radio->dwt_settxantennadelay(TX_ANT_DELAY);
+	// Configuring the DW1000 interrupt, although it is not actually used.
+	dwt_setinterrupt(DWT_INT_RFCG | (DWT_INT_ARFE | DWT_INT_RFSL | DWT_INT_SFDT | DWT_INT_RPHE | DWT_INT_RFCE | DWT_INT_RFTO /*| DWT_INT_RXPTO*/), 1);
 
-    //in my other code, I put sleep settings here. I don't really need that for this example, so I exclude it.
+	BPhero_UWB_Message_Init();
 
-    //we should also probably set the pan_id here, but I'll skip that for now.
-    //radio->dwt_setpanid(1);
-    
-    Serial.println("Ready");
+	uint8_t token = 0;
+
+	msg_f_send.sourceAddr[0] = 1 & 0xFF;		// copy the address
+	msg_f_send.sourceAddr[1] = (1 >> 8) & 0xFF; // copy the address
+
+	while (1)
+	{
+		msg_f_send.destAddr[0] = (2 + token) & 0xFF;
+		msg_f_send.destAddr[1] = ((2 + token) >> 8) & 0xFF;
+
+		msg_f_send.seqNum = distance_seqnum;
+		msg_f_send.messageData[0] = 'P'; // Send Poll Message
+
+		dwt_writetxdata(psduLength + 1, (uint8_t *)&msg_f_send, 0);
+
+		dwt_writetxfctrl(psduLength + 1, 0);
+		// Set the time to start sending to the receiver.
+		dwt_setrxaftertxdelay(POLL_TX_TO_RESP_RX_DLY_UUS);
+		// Set the timeout duration.
+		dwt_setrxtimeout(300);
+		// Set the preamble timeout.
+		dwt_setpreambledetecttimeout(0);
+		// Send immediately upon startup
+		dwt_starttx(DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
+
+		// Waiting for reception to complete
+		while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_ERR)))
+		{
+		};
+
+		if (status_reg & SYS_STATUS_RXFCG)
+		{
+			frame_len = dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
+
+			// cur_ts = get_cur_timestamp_u64();
+
+			dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG | SYS_STATUS_TXFRS);
+
+			if (frame_len <= FRAME_LEN_MAX)
+			{
+				// Read the transmitted data.
+				dwt_readrxdata(rx_buffer, frame_len, 0);
+				// Convert the transmitted data into message format.
+				msg_f_recv = (srd_msg_dsss *)rx_buffer;
+			}
+
+			if ('A' == msg_f_recv->messageData[0])
+			{
+
+				// Read the Poll transmission time and the Resp reception time.
+				poll_tx_ts = get_tx_timestamp_u64();
+				resp_rx_ts = get_rx_timestamp_u64();
+
+				// Set the final delayed sending time.
+				final_tx_time = (resp_rx_ts + ((RESP_RX_TO_FINAL_TX_DLY_UUS)*UUS_TO_DWT_TIME)) >> 8;
+
+				dwt_setdelayedtrxtime(final_tx_time);
+
+				final_tx_ts = (((uint64_t)(final_tx_time & 0xFFFFFFFEUL)) << 8) + TX_ANT_DLY;
+
+				// Configure Final Data Transmission
+				msg_f_send.messageData[0] = 'F'; // Final message
+				final_msg_set_ts(&msg_f_send.messageData[FINAL_MSG_POLL_TX_TS_IDX], poll_tx_ts);
+				final_msg_set_ts(&msg_f_send.messageData[FINAL_MSG_RESP_RX_TS_IDX], resp_rx_ts);
+				final_msg_set_ts(&msg_f_send.messageData[FINAL_MSG_FINAL_TX_TS_IDX], final_tx_ts);
+				final_msg_set_ts(&msg_f_send.messageData[FINAL_MSG_FINAL_TX_TS_IDX + 4], final_tx_ts);
+
+				dwt_writetxdata(9 + 17, (uint8_t *)&msg_f_send, 0); // write the frame data
+				dwt_writetxfctrl(9 + 17, 0);
+				// Delayed sending
+
+				// cur_ts = get_cur_timestamp_u64();
+
+				ret = dwt_starttx(DWT_START_TX_DELAYED);
+
+				// dwt_readdiagnostics(&rx_diag1);
+				// uint16_t fp_int1 = rx_diag1.firstPath >> 6;
+				uint16_t fp_int1 = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
+				dwt_readaccdata(cir_buffer1, CIR_LENGTH * 4, (fp_int1) * 4);
+
+				if (DWT_SUCCESS == ret)
+				{
+
+					msg_f_send.messageData[0] = 'X'; // Final message
+
+					for (int i = 0; i < CIR_LENGTH * 4; i++)
+					{
+						// Requires the use of the FP's CIR.
+						msg_f_send.messageData[FINAL_MSG_POLL_TX_TS_IDX + i] = cir_buffer1[i + 5];
+					}
+
+					/* Write and send final2 message. */
+					final2_tx_time = (resp_rx_ts + ((540 * 2) * UUS_TO_DWT_TIME)) >> 8;
+
+					while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) & SYS_STATUS_TXFRS))
+					{
+					};
+
+					dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
+
+					dwt_setdelayedtrxtime(final2_tx_time);
+
+					dwt_writetxdata(psduLength + 16, (uint8_t *)&msg_f_send, 0); // write the frame data
+					dwt_writetxfctrl(psduLength + 16, 0);
+
+					ret = dwt_starttx(DWT_START_TX_DELAYED);
+
+					while (!(dwt_read32bitreg(SYS_STATUS_ID) & SYS_STATUS_TXFRS))
+					{
+					};
+
+					/* Clear TX frame sent event. */
+					dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
+
+					Final_Distance = (msg_f_recv->messageData[1] * 100 + msg_f_recv->messageData[2]); // cm
+
+					float uwb_rssi = 0;
+					// uwb_rssi = dwGetReceivePower();
+
+					//										if (msg_f_send.seqNum % 3 == 2)
+					//										{
+					//												token = (token + 1) % board_num;
+					//										}
+
+					token = (token + 1) % board_num;
+
+					//										if (msg_f_send.seqNum % 3 == 2)
+					//										{
+					//												//HalDelay_nMs();
+					//										}
+
+					// Increment Sequence Num
+					if (distance_seqnum == 254)
+					{
+						distance_seqnum = 0;
+					}
+					else
+					{
+						distance_seqnum++;
+					}
+					//++distance_seqnum;
+				}
+				else
+				{
+					// OLED_ShowString(0,0,"Final Fail");
+				}
+			}
+		}
+		else
+		{
+
+			// OLED_ShowString(0,1,"Resp Fail");
+			dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
+		}
+	}
+
+	return 0;
 }
 
-
-void loop() {
-
-
-#ifdef TAG
-    loop_ds_tag();
-#else
-    loop_ds_anchor();
+// #else
 #endif
 
+#ifdef RX_NODE
+
+static srd_msg_dsss *msg_f;
+static double tof;
+static double distance;
+
+// Define the save timestamp.
+static uint32_t poll_tx_ts, resp_rx_ts, final_tx_ts;
+static uint32_t poll_rx_ts_32, resp_tx_ts_32, final_rx_ts_32;
+
+static uint64_t poll_rx_ts;
+static uint64_t resp_tx_ts;
+static uint64_t final_rx_ts;
+static uint64_t final2_rx_ts;
+
+static double Ra, Rb, Da, Db;
+static int64 tof_dtu;
+static int temp = 0;	   // Save temporary variable
+static float uwb_rssi = 0; // Define a variable to store the RSSI signal strength.
+
+static int n = 0;
+
+static uint8_t debug = 0;
+
+static uint8_t uCurrentTrim_val = 19;
+
+static uint16_t addr = 2;
+
+int dw_main(void)
+{
+
+	// RX_ANT_DLY = rfDelaysTREK[1];
+	// TX_ANT_DLY = rfDelaysTREK[1];
+
+	// Modify it to use our own code.
+	reset_DW1000();
+
+	SPI_ConfigFastRate(SPI_BaudRatePrescaler_32);
+
+	// Initialize the DW1000
+	if (dwt_initialise(DWT_LOADUCODE) == DWT_ERROR)
+	{
+		while (1)
+		{
+		};
+	}
+
+	// Read crystal oscillator calibration parameters.
+	// dwt_xtaltrim(uCurrentTrim_val);
+
+	// dwt_readfromdevice(FS_CTRL_ID,FS_XTALT_OFFSET,1,&uCurrentTrim_val);
+	// uCurrentTrim_val &= 31;
+
+	// Adjust the SPI to 18 MHz.
+	SPI_ConfigFastRate(SPI_BaudRatePrescaler_4);
+
+	// Configure the operating frequency
+	// config.txCode = 7 + addr;
+	// config.rxCode = 7 + addr;
+	dwt_configure(&config);
+	// Activate the DW1000 status indicator.
+	dwt_setleds(1);
+	// Configure transmit power
+	dwt_configuretxrf(&txconfig2);
+	// Set Work Network ID
+	dwt_setpanid(NET_PANID);
+	// Set own short address
+	dwt_setaddress16(addr);
+	// Configure antenna delay
+	dwt_setrxaftertxdelay(RX_ANT_DLY);
+	dwt_settxantennadelay(TX_ANT_DLY);
+
+	// Configuring the DW1000 interrupt, although it is not actually used.
+	dwt_setinterrupt(DWT_INT_RFCG | (DWT_INT_ARFE | DWT_INT_RFSL | DWT_INT_SFDT | DWT_INT_RPHE | DWT_INT_RFCE | DWT_INT_RFTO /*| DWT_INT_RXPTO*/), 1);
+
+	BPhero_UWB_Message_Init();
+
+	uint8_t err_cnt = 0;
+
+	msg_f_send.sourceAddr[0] = (2 + addr) & 0xFF;		 // copy the address
+	msg_f_send.sourceAddr[1] = ((2 + addr) >> 8) & 0xFF; // copy the address
+
+	uint16_t counter = 0;
+
+	while (1)
+	{
+
+		// Start receiving
+		// Step1:Enable frame filtering --> Receive data packets only; for more information on frame filtering features, please refer to 51uwb.cn.
+		// dwt_enableframefilter(DWT_FF_DATA_EN);
+		// Step2:Set the reception timeout; a timeout parameter of 0 indicates that the system remains in the receiving state indefinitely.
+		dwt_setrxtimeout(1000);
+		dwt_setpreambledetecttimeout(0);
+		// Step3:Initiate reception immediately. The parameters of this function allow for a delayed start to reception; this can be optimized by delaying the receiver's activation to reduce energy consumption.
+		dwt_rxenable(DWT_START_TX_IMMEDIATE);
+
+		while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_ERR)))
+		{
+		};
+
+		// Determine whether the complete data has been received.
+		if (status_reg & SYS_STATUS_RXFCG)
+		{
+			if (err_cnt > 0)
+			{
+				err_cnt = 0;
+			}
+			// Read the length of the received data.
+			frame_len = dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
+
+			dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG);
+
+			// If the data length is less than the maximum value, it is considered reasonable.
+			if (frame_len <= FRAME_LEN_MAX)
+			{
+
+				// Read the received data.
+				dwt_readrxdata(rx_buffer, frame_len, 0);
+				// Force the data into the agreed-upon format.
+				msg_f = (srd_msg_dsss *)rx_buffer;
+
+				if ((msg_f->destAddr[0] != msg_f_send.sourceAddr[0]) || (msg_f->destAddr[1] != msg_f_send.sourceAddr[1]))
+				{
+					continue;
+				}
+
+				// Extract the short address used to send this data and assign it to the destination address for the message to be sent.
+				// Where did the information come from, and who should the reply be sent to?
+				msg_f_send.destAddr[0] = msg_f->sourceAddr[0];
+				msg_f_send.destAddr[1] = msg_f->sourceAddr[1];
+				// Extract sequence number
+				msg_f_send.seqNum = msg_f->seqNum;
+
+				uint16_t fp_int1 = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
+
+				//							if (fp_int1 > 757 || fp_int1 < 730)
+				//							{
+				////								uint16_t firstPathAmp2 = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x2);
+				////								n += sprintf((char *)&usbVCOMout[n], "f, %0x, %d, %d\r\n", msg_f_send.seqNum, fp_int1, firstPathAmp2);
+
+				////								HalUsbWrite(usbVCOMout, n);
+				////								n = 0;
+				//								n = 0;
+				//								n += sprintf((char *)&usbVCOMout[n], "error\r");
+				//								HalUsbWrite(usbVCOMout, n);
+				//
+				//								n = 0;
+				//								// continue;
+				//							}
+
+				if ('P' == msg_f->messageData[0])
+				{
+
+					uint32_t resp_tx_time;
+					int ret;
+
+					// Save the timestamp of when this message was received.
+					poll_rx_ts = get_rx_timestamp_u64();
+
+					resp_tx_time = (poll_rx_ts + ((POLL_RX_TO_RESP_TX_DLY_UUS)*UUS_TO_DWT_TIME)) >> 8;
+					dwt_setdelayedtrxtime(resp_tx_time);
+
+					dwt_setrxaftertxdelay(RESP_TX_TO_FINAL_RX_DLY_UUS);
+					dwt_setrxtimeout(500);
+
+					msg_f_send.messageData[0] = 'A'; // Poll ack message
+					// Package and send the previous ranging information.
+					temp = (int)(distance * 100); // convert m to cm
+					msg_f_send.messageData[1] = temp / 100;
+					msg_f_send.messageData[2] = temp % 100;
+					// Write the data to be sent into the UWB registers.
+					dwt_writetxdata(psduLength + 3, (uint8_t *)&msg_f_send, 0); // write the frame data
+					// Indicate that the UWB data transmission offset is 0.
+					dwt_writetxfctrl(psduLength + 3, 0);
+
+					// Send immediately upon startup
+					ret = dwt_starttx(DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED);
+					// Waiting for transmission to complete
+
+					// uint16_t fp_int1 = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
+					dwt_readaccdata(cir_buffer1, CIR_LENGTH * 4, (fp_int1) * 4);
+
+					// MUST WAIT!!!!!
+					while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_ERR)))
+					{
+					};
+
+					if (status_reg & SYS_STATUS_RXFCG)
+					{
+
+						dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG);
+
+						frame_len = dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
+
+						// 60us
+						if (frame_len <= FRAME_LEN_MAX)
+						{
+
+							// Read the received data.
+							dwt_readrxdata(rx_buffer, frame_len, 0);
+							// Force the data into the agreed-upon format.
+							msg_f = (srd_msg_dsss *)rx_buffer;
+
+							// Extract the short address used to send this data and assign it to the destination address for the message to be sent.
+							// Where did the information come from, and who should the reply be sent to?
+							msg_f_send.destAddr[0] = msg_f->sourceAddr[0];
+							msg_f_send.destAddr[1] = msg_f->sourceAddr[1];
+							// Extract sequence number
+							//  80us
+							msg_f_send.seqNum = msg_f->seqNum;
+
+							if ('F' == msg_f->messageData[0])
+							{
+								// printf("Receive Final\r");
+								// Save the timestamp of sending message A.
+								resp_tx_ts = get_tx_timestamp_u64();
+								// Save the timestamp of receiving the 'F' message.
+								final_rx_ts = get_rx_timestamp_u64();
+
+								// Extract timestamp information from the data packet payload.
+								//  50us
+								final_msg_get_ts(&msg_f->messageData[FINAL_MSG_POLL_TX_TS_IDX], &poll_tx_ts);
+								final_msg_get_ts(&msg_f->messageData[FINAL_MSG_RESP_RX_TS_IDX], &resp_rx_ts);
+								final_msg_get_ts(&msg_f->messageData[FINAL_MSG_FINAL_TX_TS_IDX], &final_tx_ts);
+
+								// dwt_readdiagnostics(&rx_diag2);
+								uint16_t fp_int2 = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
+								// uint16_t fp_int2 = rx_diag2.firstPath >> 6;
+								dwt_readaccdata(cir_buffer2, CIR_LENGTH * 4, (fp_int2) * 4);
+								// dwt_readaccdata(cir_buffer2, 4 * CIR_LENGTH, (fp_int2-6) * 4);
+
+								uint32_t_t final2_rx_enable = (final_rx_ts + (430 * UUS_TO_DWT_TIME)) >> 8;
+
+								dwt_setdelayedtrxtime(final2_rx_enable);
+								dwt_setrxtimeout(500);
+
+								dwt_rxenable(1);
+
+								/* Poll for reception of a frame or error/timeout. See NOTE 7 below. */
+								while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_ERR)))
+								{
+								};
+
+								if (status_reg & SYS_STATUS_RXFCG)
+								{
+
+									final2_rx_ts = get_rx_timestamp_u64();
+									frame_len = dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
+
+									dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG);
+
+									for (uint32_t i = 0; i < FRAME_LEN_MAX; i++)
+									{
+										rx_buffer[i] = '\0';
+									}
+
+									if (frame_len <= FRAME_LEN_MAX)
+									{
+										// Read the received data.
+										dwt_readrxdata(rx_buffer, frame_len, 0);
+
+										// Force the data into the agreed-upon format.
+										msg_f = (srd_msg_dsss *)rx_buffer;
+										// Extract the short address used to send this data and assign it to the destination address for the message to be sent.
+										// Where did the information come from, and who should the reply be sent to?
+										msg_f_send.destAddr[0] = msg_f->sourceAddr[0];
+										msg_f_send.destAddr[1] = msg_f->sourceAddr[1];
+										// Extract sequence number
+										msg_f_send.seqNum = msg_f->seqNum;
+
+										if ('X' == msg_f->messageData[0])
+										{
+
+											for (int i = 0; i < CIR_LENGTH * 4; i++)
+											{
+												cir_buffer3[i] = msg_f->messageData[FINAL_MSG_POLL_TX_TS_IDX + i];
+											}
+
+											// dwt_readdiagnostics(&rx_diag4);
+											// uint16_t fp_int4 = rx_diag4.firstPath >> 6;
+											uint16_t fp_int4 = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET);
+											dwt_readaccdata(cir_buffer4, CIR_LENGTH * 4, ((fp_int4 >> 6)) * 4);
+
+											// For distance calculation based on the TWR algorithm, you can refer to the video tutorial on 51uwb.cn.
+											poll_rx_ts_32 = (uint32_t)poll_rx_ts;
+											resp_tx_ts_32 = (uint32_t)resp_tx_ts;
+											final_rx_ts_32 = (uint32_t)final_rx_ts;
+											Ra = (double)(resp_rx_ts - poll_tx_ts);
+											Rb = (double)(final_rx_ts_32 - resp_tx_ts_32);
+											Da = (double)(final_tx_ts - resp_rx_ts);
+											Db = (double)(resp_tx_ts_32 - poll_rx_ts_32);
+											tof_dtu = (int64)((Ra * Rb - Da * Db) / (Ra + Rb + Da + Db));
+
+											tof = tof_dtu * DWT_TIME_UNITS;
+											distance = tof * SPEED_OF_LIGHT;
+											// The official documentation provides offset correction data, allowing users to adjust the offset table values ​​as appropriate based on the environment.
+											// distance = distance - dwt_getrangebias(config.chan,(float)distance, config.prf);//Distance minus correction factor
+											// Apply Kalman filtering to the calculated distance.
+											// kalman filter
+											// distance = KalMan(distance);
+
+											int32 ci;
+											float clockOffsetHertz;
+											float clockOffsetPPM;
+
+											ci = dwt_readcarrierintegrator();
+
+											clockOffsetHertz = ci * FREQ_OFFSET_MULTIPLIER;
+
+											if (msg_f_send.seqNum % 3 == 0)
+											{
+												clockOffsetPPM = clockOffsetHertz * HERTZ_TO_PPM_MULTIPLIER_CHAN_2;
+											}
+											else if (msg_f_send.seqNum % 3 == 1)
+											{
+												clockOffsetPPM = clockOffsetHertz * HERTZ_TO_PPM_MULTIPLIER_CHAN_3;
+											}
+											else if (msg_f_send.seqNum % 3 == 2)
+											{
+												clockOffsetPPM = clockOffsetHertz * HERTZ_TO_PPM_MULTIPLIER_CHAN_5;
+											}
+
+											//																				if (clockOffsetPPM > 1.3f)
+											//																				{
+											//																						if (uCurrentTrim_val >= 1 && uCurrentTrim_val <= 31)
+											//																						{
+											//
+											//																							SPI_ConfigFastRate(SPI_BaudRatePrescaler_32);
+											//
+											//																							uCurrentTrim_val -= 1;
+											//																							dwt_xtaltrim(uCurrentTrim_val);
+											//																							SPI_ConfigFastRate(SPI_BaudRatePrescaler_4);
+											//
+											//																						}
+											//																				}
+											//																				else if(clockOffsetPPM < -1.3f)
+											//																				{
+											//																						if (uCurrentTrim_val >= 1 && uCurrentTrim_val <= 31)
+											//																						{
+											//
+											//																							SPI_ConfigFastRate(SPI_BaudRatePrescaler_32);
+											//
+											//																							uCurrentTrim_val += 1;
+											//																							dwt_xtaltrim(uCurrentTrim_val);
+											//																							SPI_ConfigFastRate(SPI_BaudRatePrescaler_4);
+											//
+											//																						}
+											//																				}
+
+											// Send distance information to the serial port.
+											// printf("0x%04X <--> 0x%02X%02X :%d cm\r\n",SHORT_ADDR,msg_f_send.destAddr[1],msg_f_send.destAddr[0],(int)(100*distance));
+											temp = (int)(distance * 100);
+
+											//don't strictly need this, so we'll ignore it.
+											uwb_rssi = 0;
+											//uwb_rssi = dwGetReceivePower();
+
+											struct cir_tap_struct *cir = (struct cir_tap_struct *)&cir_buffer1[1];
+
+											for (int j = 1; j < 2; j++)
+											{
+												n += sprintf((char *)&usbVCOMout[n], "%04x,%04x,", cir[j].real, cir[j].imag);
+											}
+
+											n += sprintf((char *)&usbVCOMout[n], "%04x,%04x,%02x,%d\r", 0, 1, msg_f_send.seqNum, fp_int1);
+
+											cir = (struct cir_tap_struct *)&cir_buffer2[1];
+											;
+
+											for (int j = 1; j < 2; j++)
+											{
+												n += sprintf((char *)&usbVCOMout[n], "%04x,%04x,", cir[j].real, cir[j].imag);
+											}
+
+											n += sprintf((char *)&usbVCOMout[n], "%04x,%04x,%02x,%f\r", 0, 2, msg_f_send.seqNum, clockOffsetPPM);
+
+											cir = (struct cir_tap_struct *)cir_buffer3;
+
+											for (int j = 0; j < 1; j++)
+											{
+												n += sprintf((char *)&usbVCOMout[n], "%04x,%04x,", cir[j].real, cir[j].imag);
+											}
+
+											n += sprintf((char *)&usbVCOMout[n], "%04d,%04x,%02x,%6.5f\r", uCurrentTrim_val, 3, msg_f_send.seqNum, uwb_rssi);
+
+											cir = (struct cir_tap_struct *)&cir_buffer4[1];
+											;
+
+											for (int j = 1; j < 2; j++)
+											{
+												n += sprintf((char *)&usbVCOMout[n], "%04x,%04x,", cir[j].real, cir[j].imag);
+											}
+
+											n += sprintf((char *)&usbVCOMout[n], "%04x,%04x,%02x,%6.5f\r~", fp_int4, 4, msg_f_send.seqNum, distance);
+
+											// App_Module_Uart_USB_Send(usbVCOMout, n);
+
+											// printf("%.*s", n, usbVCOMout);
+											HalUsbWrite(usbVCOMout, n);
+
+											n = 0;
+										}
+									}
+								}
+								else
+								{
+									/* Clear RX error events in the DW1000 status register. */
+									dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
+								}
+								// freq_hooping(msg_f_send.seqNum, addr-2);
+								// freq_hooping(msg_f_send.seqNum, 0);
+								// if (msg_f_send.seqNum % 3 == 2)
+								// dwt_forcetrxoff();
+								// HalDelay_nMs(7);
+							}
+						}
+					}
+					else
+					{
+						/* Clear RX error events in the DW1000 status register. */
+						dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
+					}
+				}
+			}
+		}
+		else
+		{
+			/* Clear RX error events in the DW1000 status register. */
+			dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
+
+			//					if(msg_f_send.seqNum % 3 != 2){
+			//
+			//						err_cnt++;
+			//						if (err_cnt >= 2)
+			//						{
+			//
+			//							freq_hooping(msg_f_send.seqNum,addr-2);
+			//							err_cnt = 0;
+			//
+			//							n += sprintf((char *)&usbVCOMout[n], "change, %d\r\n", msg_f_send.seqNum);
+
+			//							HalUsbWrite(usbVCOMout, n);
+			//							n = 0;
+			//						}
+			//					}
+		}
+	}
+
+	return 0;
 }
 
+#endif
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+// #endif
