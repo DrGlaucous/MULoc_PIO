@@ -24,32 +24,6 @@
 
 
 
-///////////////////////////////////Constants
-
-#define BAUD_RATE 460800
-
-#define LED_D9 4
-#define LED_D10 5
-#define LED_D11 22
-#define LED_D12 14
-
-//onboard pushbuttons for the DWM3001CDK
-#define SWITCH_1 18
-#define SWITCH_2 2
-
-//adding 32 gives us pin bank 2.
-#define SPI_CS 32 + 6
-#define SPI_CLK 3
-#define SPI_MOSI 8
-#define SPI_MISO 29
-
-//other radio control pins
-#define DW_RST 25
-#define DW_IRQ 32 + 2
-#define DW_WUP 32 + 19
-
-
-
 
 /**
 **===========================================================================
@@ -73,6 +47,7 @@ static srd_msg_dsss *msg_f_recv;
 #define TX_ANT_DLY 32880
 
 #define CIR_LENGTH 3
+#define COMPLEX_BYTE_LEN 6
 #define LCD_BUFF_LEN (500)
 
 static dwt_rxdiag_t rx_diag1;
@@ -118,17 +93,24 @@ srd_msg_dsss msg_f_send;
 
 uint8_t rx_buffer[FRAME_LEN_MAX];
 //uint32_t status_reg = 0;
-//uint16_t frame_len = 0;
+static uint32_t frame_len = 0;
 
 //I can only guess what this method does
 void BPhero_UWB_Message_Init() {
     memset(&msg_f_send, 0, sizeof(msg_f_send));
 }
 
+//have to guess how these work
+//final_msg_set_ts(&msg_f_send.messageData[FINAL_MSG_POLL_TX_TS_IDX], poll_tx_ts);
+void final_msg_set_ts(uint8_t* ptr, uint64_t timestamp) {
+	PacketHelpers::num_to_byte_array(timestamp, ptr, 5);
+}
+uint64_t final_msg_get_ts(uint8_t* ptr) {
+	PacketHelpers::byte_array_to_num(ptr, 5);
+}
 
-
-
-
+//everything important is inside the loop section
+void setup() {}
 
 
 // #pragma GCC optimize ("O3")
@@ -199,7 +181,7 @@ dwt_txconfig_t txconfig_ch9 = {
 
 
 
-int dw_main(void)
+void loop(void)
 {
 	// sets up the device to use the pins on the bottom left of the rPi header for serial communication.
 	Serial = Uart(NRF_UART0, UARTE0_UART0_IRQn, 31, 7);
@@ -242,28 +224,33 @@ int dw_main(void)
 	//unsure if we need this for the DW3000.
 	radio->dwt_setxtaltrim(16);
 
+
+	//enable CIR collection
+	radio->dwt_configciadiag(DW_CIA_DIAG_LOG_ALL);
+
 	// Adjust the SPI to 18 MHz.
 	//SPI_ConfigFastRate(SPI_BaudRatePrescaler_4);
 	// Configure the operating frequency
 
 	//		config.txCode = 10;
 	//		config.rxCode = 10;
-	dwt_configure(&config);
+	radio->dwt_configure(&config_ch5);
 	// Activate the DW1000 status indicator.
-	dwt_setleds(1);
+	radio->dwt_setleds(1);
 	// Configure transmit power
-	dwt_configuretxrf(&txconfig2);
+	radio->dwt_configuretxrf(&txconfig_ch5);
 	// Set Work Network ID
-	dwt_setpanid(NET_PANID);
+	radio->dwt_setpanid(NET_PANID);
 	// Set own short address
-	dwt_setaddress16(1);
+	radio->dwt_setaddress16(1);
 	// Configure antenna delay
-	dwt_setrxaftertxdelay(RX_ANT_DLY);
-	dwt_settxantennadelay(TX_ANT_DLY);
+	radio->dwt_setrxaftertxdelay(RX_ANT_DLY);
+	radio->dwt_settxantennadelay(TX_ANT_DLY);
 
 	// Configuring the DW1000 interrupt, although it is not actually used.
-	dwt_setinterrupt(DWT_INT_RFCG | (DWT_INT_ARFE | DWT_INT_RFSL | DWT_INT_SFDT | DWT_INT_RPHE | DWT_INT_RFCE | DWT_INT_RFTO /*| DWT_INT_RXPTO*/), 1);
+	//radio->dwt_setinterrupt(DWT_INT_RFCG | (DWT_INT_ARFE | DWT_INT_RFSL | DWT_INT_SFDT | DWT_INT_RPHE | DWT_INT_RFCE | DWT_INT_RFTO /*| DWT_INT_RXPTO*/), 1);
 
+	//wipes buffer bits. Not sure if it's supposed to do anything else
 	BPhero_UWB_Message_Init();
 
 	uint8_t token = 0;
@@ -279,35 +266,43 @@ int dw_main(void)
 		msg_f_send.seqNum = distance_seqnum;
 		msg_f_send.messageData[0] = 'P'; // Send Poll Message
 
-		dwt_writetxdata(psduLength + 1, (uint8_t *)&msg_f_send, 0);
+		radio->dwt_writetxdata(psduLength + 1, (uint8_t *)&msg_f_send, 0);
 
-		dwt_writetxfctrl(psduLength + 1, 0);
+		radio->dwt_writetxfctrl(psduLength + 1, 0, 1);
 		// Set the time to start sending to the receiver.
-		dwt_setrxaftertxdelay(POLL_TX_TO_RESP_RX_DLY_UUS);
+		radio->dwt_setrxaftertxdelay(POLL_TX_TO_RESP_RX_DLY_UUS);
 		// Set the timeout duration.
-		dwt_setrxtimeout(300);
+		radio->dwt_setrxtimeout(300);
 		// Set the preamble timeout.
-		dwt_setpreambledetecttimeout(0);
+		radio->dwt_setpreambledetecttimeout(0);
 		// Send immediately upon startup
-		dwt_starttx(DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
+		radio->dwt_starttx(DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
 
 		// Waiting for reception to complete
-		while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_ERR)))
+		while (!((status_reg = radio->dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG_BIT_MASK | SYS_STATUS_ALL_RX_ERR)))
 		{
 		};
 
-		if (status_reg & SYS_STATUS_RXFCG)
+		// auto status_reg = 0;
+		// do {
+		// 	status_reg = radio->check_for_rx();
+		// } while(!status_reg);
+
+
+		if (status_reg & SYS_STATUS_RXFCG_BIT_MASK)
 		{
-			frame_len = dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
+			//frame_len = radio->dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
+			frame_len = radio->get_frame_length();
 
 			// cur_ts = get_cur_timestamp_u64();
 
-			dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG | SYS_STATUS_TXFRS);
+			radio->dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG_BIT_MASK | SYS_STATUS_TXFRS_BIT_MASK);
+
 
 			if (frame_len <= FRAME_LEN_MAX)
 			{
 				// Read the transmitted data.
-				dwt_readrxdata(rx_buffer, frame_len, 0);
+				radio->dwt_readrxdata(rx_buffer, frame_len, 0);
 				// Convert the transmitted data into message format.
 				msg_f_recv = (srd_msg_dsss *)rx_buffer;
 			}
@@ -316,13 +311,13 @@ int dw_main(void)
 			{
 
 				// Read the Poll transmission time and the Resp reception time.
-				poll_tx_ts = get_tx_timestamp_u64();
-				resp_rx_ts = get_rx_timestamp_u64();
+				poll_tx_ts = radio->get_tx_timestamp_u64();
+				resp_rx_ts = radio->get_rx_timestamp_u64();
 
 				// Set the final delayed sending time.
 				final_tx_time = (resp_rx_ts + ((RESP_RX_TO_FINAL_TX_DLY_UUS)*UUS_TO_DWT_TIME)) >> 8;
 
-				dwt_setdelayedtrxtime(final_tx_time);
+				radio->dwt_setdelayedtrxtime(final_tx_time);
 
 				final_tx_ts = (((uint64_t)(final_tx_time & 0xFFFFFFFEUL)) << 8) + TX_ANT_DLY;
 
@@ -331,20 +326,26 @@ int dw_main(void)
 				final_msg_set_ts(&msg_f_send.messageData[FINAL_MSG_POLL_TX_TS_IDX], poll_tx_ts);
 				final_msg_set_ts(&msg_f_send.messageData[FINAL_MSG_RESP_RX_TS_IDX], resp_rx_ts);
 				final_msg_set_ts(&msg_f_send.messageData[FINAL_MSG_FINAL_TX_TS_IDX], final_tx_ts);
-				final_msg_set_ts(&msg_f_send.messageData[FINAL_MSG_FINAL_TX_TS_IDX + 4], final_tx_ts);
+				//final_msg_set_ts(&msg_f_send.messageData[FINAL_MSG_FINAL_TX_TS_IDX + 4], final_tx_ts); //what was this one for?
 
-				dwt_writetxdata(9 + 17, (uint8_t *)&msg_f_send, 0); // write the frame data
-				dwt_writetxfctrl(9 + 17, 0);
+				radio->dwt_writetxdata(9 + 17, (uint8_t *)&msg_f_send, 0); // write the frame data
+				radio->dwt_writetxfctrl(9 + 17, 0, 1);
 				// Delayed sending
 
 				// cur_ts = get_cur_timestamp_u64();
 
-				ret = dwt_starttx(DWT_START_TX_DELAYED);
+				ret = radio->dwt_starttx(DWT_START_TX_DELAYED);
 
 				// dwt_readdiagnostics(&rx_diag1);
 				// uint16_t fp_int1 = rx_diag1.firstPath >> 6;
-				uint16_t fp_int1 = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
-				dwt_readaccdata(cir_buffer1, CIR_LENGTH * 4, (fp_int1) * 4);
+				//uint16_t fp_int1 = radio->dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
+				//radio->dwt_readaccdata(cir_buffer1, CIR_LENGTH * 4, (fp_int1) * 4);
+
+				dwt_rxdiag_t diagnostics = {};
+       			radio->dwt_readdiagnostics(&diagnostics);
+				uint16_t fp_index = diagnostics.ipatovFpIndex >> 6; //bit shifting removes the fractional part
+				radio->dwt_readaccdata(cir_buffer1, (COMPLEX_BYTE_LEN * CIR_LEN + 1), fp_index);
+
 
 				if (DWT_SUCCESS == ret)
 				{
@@ -354,31 +355,33 @@ int dw_main(void)
 					for (int i = 0; i < CIR_LENGTH * 4; i++)
 					{
 						// Requires the use of the FP's CIR.
-						msg_f_send.messageData[FINAL_MSG_POLL_TX_TS_IDX + i] = cir_buffer1[i + 5];
+						//msg_f_send.messageData[FINAL_MSG_POLL_TX_TS_IDX + i] = cir_buffer1[i + 5];
+
+						msg_f_send.messageData[FINAL_MSG_POLL_TX_TS_IDX + i] = cir_buffer1[i + 1];
 					}
 
 					/* Write and send final2 message. */
 					final2_tx_time = (resp_rx_ts + ((540 * 2) * UUS_TO_DWT_TIME)) >> 8;
 
-					while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) & SYS_STATUS_TXFRS))
+					while (!((status_reg = radio->dwt_read32bitreg(SYS_STATUS_ID)) & SYS_STATUS_TXFRS_BIT_MASK))
 					{
 					};
 
-					dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
+					radio->dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS_BIT_MASK);
 
-					dwt_setdelayedtrxtime(final2_tx_time);
+					radio->dwt_setdelayedtrxtime(final2_tx_time);
 
-					dwt_writetxdata(psduLength + 16, (uint8_t *)&msg_f_send, 0); // write the frame data
-					dwt_writetxfctrl(psduLength + 16, 0);
+					radio->dwt_writetxdata(psduLength + 16, (uint8_t *)&msg_f_send, 0); // write the frame data
+					radio->dwt_writetxfctrl(psduLength + 16, 0, 1);
 
-					ret = dwt_starttx(DWT_START_TX_DELAYED);
+					ret = radio->dwt_starttx(DWT_START_TX_DELAYED);
 
-					while (!(dwt_read32bitreg(SYS_STATUS_ID) & SYS_STATUS_TXFRS))
+					while (!(radio->dwt_read32bitreg(SYS_STATUS_ID) & SYS_STATUS_TXFRS_BIT_MASK))
 					{
 					};
 
 					/* Clear TX frame sent event. */
-					dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
+					radio->dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS_BIT_MASK);
 
 					Final_Distance = (msg_f_recv->messageData[1] * 100 + msg_f_recv->messageData[2]); // cm
 
@@ -418,11 +421,11 @@ int dw_main(void)
 		{
 
 			// OLED_ShowString(0,1,"Resp Fail");
-			dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
+			radio->dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
 		}
 	}
 
-	return 0;
+	//return 0;
 }
 
 // #else
@@ -487,21 +490,21 @@ int dw_main(void)
 	// Configure the operating frequency
 	// config.txCode = 7 + addr;
 	// config.rxCode = 7 + addr;
-	dwt_configure(&config);
+	radio->dwt_configure(&config);
 	// Activate the DW1000 status indicator.
-	dwt_setleds(1);
+	radio->dwt_setleds(1);
 	// Configure transmit power
-	dwt_configuretxrf(&txconfig2);
+	radio->dwt_configuretxrf(&txconfig2);
 	// Set Work Network ID
-	dwt_setpanid(NET_PANID);
+	radio->dwt_setpanid(NET_PANID);
 	// Set own short address
-	dwt_setaddress16(addr);
+	radio->dwt_setaddress16(addr);
 	// Configure antenna delay
-	dwt_setrxaftertxdelay(RX_ANT_DLY);
-	dwt_settxantennadelay(TX_ANT_DLY);
+	radio->dwt_setrxaftertxdelay(RX_ANT_DLY);
+	radio->dwt_settxantennadelay(TX_ANT_DLY);
 
 	// Configuring the DW1000 interrupt, although it is not actually used.
-	dwt_setinterrupt(DWT_INT_RFCG | (DWT_INT_ARFE | DWT_INT_RFSL | DWT_INT_SFDT | DWT_INT_RPHE | DWT_INT_RFCE | DWT_INT_RFTO /*| DWT_INT_RXPTO*/), 1);
+	//dwt_setinterrupt(DWT_INT_RFCG | (DWT_INT_ARFE | DWT_INT_RFSL | DWT_INT_SFDT | DWT_INT_RPHE | DWT_INT_RFCE | DWT_INT_RFTO /*| DWT_INT_RXPTO*/), 1);
 
 	BPhero_UWB_Message_Init();
 
@@ -519,33 +522,33 @@ int dw_main(void)
 		// Step1:Enable frame filtering --> Receive data packets only; for more information on frame filtering features, please refer to 51uwb.cn.
 		// dwt_enableframefilter(DWT_FF_DATA_EN);
 		// Step2:Set the reception timeout; a timeout parameter of 0 indicates that the system remains in the receiving state indefinitely.
-		dwt_setrxtimeout(1000);
-		dwt_setpreambledetecttimeout(0);
+		radio->dwt_setrxtimeout(1000);
+		radio->dwt_setpreambledetecttimeout(0);
 		// Step3:Initiate reception immediately. The parameters of this function allow for a delayed start to reception; this can be optimized by delaying the receiver's activation to reduce energy consumption.
-		dwt_rxenable(DWT_START_TX_IMMEDIATE);
+		radio->dwt_rxenable(DWT_START_TX_IMMEDIATE);
 
-		while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_ERR)))
+		while (!((status_reg = radio->dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG_BIT_MASK | SYS_STATUS_ALL_RX_ERR)))
 		{
 		};
 
 		// Determine whether the complete data has been received.
-		if (status_reg & SYS_STATUS_RXFCG)
+		if (status_reg & SYS_STATUS_RXFCG_BIT_MASK)
 		{
 			if (err_cnt > 0)
 			{
 				err_cnt = 0;
 			}
 			// Read the length of the received data.
-			frame_len = dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
+			frame_len = radio->get_frame_length(); //radio->dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
 
-			dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG);
+			radio->dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG_BIT_MASK);
 
 			// If the data length is less than the maximum value, it is considered reasonable.
 			if (frame_len <= FRAME_LEN_MAX)
 			{
 
 				// Read the received data.
-				dwt_readrxdata(rx_buffer, frame_len, 0);
+				radio->dwt_readrxdata(rx_buffer, frame_len, 0);
 				// Force the data into the agreed-upon format.
 				msg_f = (srd_msg_dsss *)rx_buffer;
 
@@ -561,7 +564,7 @@ int dw_main(void)
 				// Extract sequence number
 				msg_f_send.seqNum = msg_f->seqNum;
 
-				uint16_t fp_int1 = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
+				uint16_t fp_int1 = radio->dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
 
 				//							if (fp_int1 > 757 || fp_int1 < 730)
 				//							{
@@ -585,13 +588,13 @@ int dw_main(void)
 					int ret;
 
 					// Save the timestamp of when this message was received.
-					poll_rx_ts = get_rx_timestamp_u64();
+					poll_rx_ts = radio->get_rx_timestamp_u64();
 
 					resp_tx_time = (poll_rx_ts + ((POLL_RX_TO_RESP_TX_DLY_UUS)*UUS_TO_DWT_TIME)) >> 8;
-					dwt_setdelayedtrxtime(resp_tx_time);
+					radio->dwt_setdelayedtrxtime(resp_tx_time);
 
-					dwt_setrxaftertxdelay(RESP_TX_TO_FINAL_RX_DLY_UUS);
-					dwt_setrxtimeout(500);
+					radio->dwt_setrxaftertxdelay(RESP_TX_TO_FINAL_RX_DLY_UUS);
+					radio->dwt_setrxtimeout(500);
 
 					msg_f_send.messageData[0] = 'A'; // Poll ack message
 					// Package and send the previous ranging information.
@@ -599,35 +602,35 @@ int dw_main(void)
 					msg_f_send.messageData[1] = temp / 100;
 					msg_f_send.messageData[2] = temp % 100;
 					// Write the data to be sent into the UWB registers.
-					dwt_writetxdata(psduLength + 3, (uint8_t *)&msg_f_send, 0); // write the frame data
+					radio->dwt_writetxdata(psduLength + 3, (uint8_t *)&msg_f_send, 0); // write the frame data
 					// Indicate that the UWB data transmission offset is 0.
-					dwt_writetxfctrl(psduLength + 3, 0);
+					radio->dwt_writetxfctrl(psduLength + 3, 0, 1);
 
 					// Send immediately upon startup
-					ret = dwt_starttx(DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED);
+					ret = radio->dwt_starttx(DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED);
 					// Waiting for transmission to complete
 
 					// uint16_t fp_int1 = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
-					dwt_readaccdata(cir_buffer1, CIR_LENGTH * 4, (fp_int1) * 4);
+					radio->dwt_readaccdata(cir_buffer1, CIR_LENGTH * 4, (fp_int1) * 4);
 
 					// MUST WAIT!!!!!
-					while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_ERR)))
+					while (!((status_reg = radio->dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG_BIT_MASK | SYS_STATUS_ALL_RX_ERR)))
 					{
 					};
 
-					if (status_reg & SYS_STATUS_RXFCG)
+					if (status_reg & SYS_STATUS_RXFCG_BIT_MASK)
 					{
 
-						dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG);
+						radio->dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG_BIT_MASK);
 
-						frame_len = dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
+						frame_len = radio->get_frame_length(); //radio->dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
 
 						// 60us
 						if (frame_len <= FRAME_LEN_MAX)
 						{
 
 							// Read the received data.
-							dwt_readrxdata(rx_buffer, frame_len, 0);
+							radio->dwt_readrxdata(rx_buffer, frame_len, 0);
 							// Force the data into the agreed-upon format.
 							msg_f = (srd_msg_dsss *)rx_buffer;
 
@@ -643,9 +646,9 @@ int dw_main(void)
 							{
 								// printf("Receive Final\r");
 								// Save the timestamp of sending message A.
-								resp_tx_ts = get_tx_timestamp_u64();
+								resp_tx_ts = radio->get_tx_timestamp_u64();
 								// Save the timestamp of receiving the 'F' message.
-								final_rx_ts = get_rx_timestamp_u64();
+								final_rx_ts = radio->get_rx_timestamp_u64();
 
 								// Extract timestamp information from the data packet payload.
 								//  50us
@@ -654,30 +657,30 @@ int dw_main(void)
 								final_msg_get_ts(&msg_f->messageData[FINAL_MSG_FINAL_TX_TS_IDX], &final_tx_ts);
 
 								// dwt_readdiagnostics(&rx_diag2);
-								uint16_t fp_int2 = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
+								uint16_t fp_int2 = radio->dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
 								// uint16_t fp_int2 = rx_diag2.firstPath >> 6;
-								dwt_readaccdata(cir_buffer2, CIR_LENGTH * 4, (fp_int2) * 4);
+								radio->dwt_readaccdata(cir_buffer2, CIR_LENGTH * 4, (fp_int2) * 4);
 								// dwt_readaccdata(cir_buffer2, 4 * CIR_LENGTH, (fp_int2-6) * 4);
 
-								uint32_t_t final2_rx_enable = (final_rx_ts + (430 * UUS_TO_DWT_TIME)) >> 8;
+								uint32_t final2_rx_enable = (final_rx_ts + (430 * UUS_TO_DWT_TIME)) >> 8;
 
-								dwt_setdelayedtrxtime(final2_rx_enable);
-								dwt_setrxtimeout(500);
+								radio->dwt_setdelayedtrxtime(final2_rx_enable);
+								radio->dwt_setrxtimeout(500);
 
-								dwt_rxenable(1);
+								radio->dwt_rxenable(1);
 
 								/* Poll for reception of a frame or error/timeout. See NOTE 7 below. */
-								while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_ERR)))
+								while (!((status_reg = radio->dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG_BIT_MASK | SYS_STATUS_ALL_RX_ERR)))
 								{
 								};
 
-								if (status_reg & SYS_STATUS_RXFCG)
+								if (status_reg & SYS_STATUS_RXFCG_BIT_MASK)
 								{
 
-									final2_rx_ts = get_rx_timestamp_u64();
-									frame_len = dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
+									final2_rx_ts = radio->get_rx_timestamp_u64();
+									frame_len = radio->get_frame_length(); //radio->dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
 
-									dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG);
+									radio->dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG_BIT_MASK);
 
 									for (uint32_t i = 0; i < FRAME_LEN_MAX; i++)
 									{
@@ -687,7 +690,7 @@ int dw_main(void)
 									if (frame_len <= FRAME_LEN_MAX)
 									{
 										// Read the received data.
-										dwt_readrxdata(rx_buffer, frame_len, 0);
+										radio->dwt_readrxdata(rx_buffer, frame_len, 0);
 
 										// Force the data into the agreed-upon format.
 										msg_f = (srd_msg_dsss *)rx_buffer;
@@ -708,8 +711,8 @@ int dw_main(void)
 
 											// dwt_readdiagnostics(&rx_diag4);
 											// uint16_t fp_int4 = rx_diag4.firstPath >> 6;
-											uint16_t fp_int4 = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET);
-											dwt_readaccdata(cir_buffer4, CIR_LENGTH * 4, ((fp_int4 >> 6)) * 4);
+											uint16_t fp_int4 = radio->dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET);
+											radio->dwt_readaccdata(cir_buffer4, CIR_LENGTH * 4, ((fp_int4 >> 6)) * 4);
 
 											// For distance calculation based on the TWR algorithm, you can refer to the video tutorial on 51uwb.cn.
 											poll_rx_ts_32 = (uint32_t)poll_rx_ts;
@@ -729,21 +732,21 @@ int dw_main(void)
 											// kalman filter
 											// distance = KalMan(distance);
 
-											int32 ci;
+											int32_t ci;
 											float clockOffsetHertz;
 											float clockOffsetPPM;
 
-											ci = dwt_readcarrierintegrator();
+											ci = radio->dwt_readcarrierintegrator();
 
 											clockOffsetHertz = ci * FREQ_OFFSET_MULTIPLIER;
 
 											if (msg_f_send.seqNum % 3 == 0)
 											{
-												clockOffsetPPM = clockOffsetHertz * HERTZ_TO_PPM_MULTIPLIER_CHAN_2;
+												clockOffsetPPM = clockOffsetHertz * HERTZ_TO_PPM_MULTIPLIER_CHAN_5;
 											}
 											else if (msg_f_send.seqNum % 3 == 1)
 											{
-												clockOffsetPPM = clockOffsetHertz * HERTZ_TO_PPM_MULTIPLIER_CHAN_3;
+												clockOffsetPPM = clockOffsetHertz * HERTZ_TO_PPM_MULTIPLIER_CHAN_9;
 											}
 											else if (msg_f_send.seqNum % 3 == 2)
 											{
@@ -826,7 +829,8 @@ int dw_main(void)
 											// App_Module_Uart_USB_Send(usbVCOMout, n);
 
 											// printf("%.*s", n, usbVCOMout);
-											HalUsbWrite(usbVCOMout, n);
+											//HalUsbWrite(usbVCOMout, n);
+											Serial.write(usbVCOMout, n);
 
 											n = 0;
 										}
@@ -835,7 +839,7 @@ int dw_main(void)
 								else
 								{
 									/* Clear RX error events in the DW1000 status register. */
-									dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
+									radio->dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
 								}
 								// freq_hooping(msg_f_send.seqNum, addr-2);
 								// freq_hooping(msg_f_send.seqNum, 0);
@@ -848,7 +852,7 @@ int dw_main(void)
 					else
 					{
 						/* Clear RX error events in the DW1000 status register. */
-						dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
+						radio->dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
 					}
 				}
 			}
@@ -856,7 +860,7 @@ int dw_main(void)
 		else
 		{
 			/* Clear RX error events in the DW1000 status register. */
-			dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
+			radio->dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
 
 			//					if(msg_f_send.seqNum % 3 != 2){
 			//
