@@ -53,10 +53,10 @@ static srd_msg_dsss *msg_f_recv;
 static dwt_rxdiag_t rx_diag1;
 static uint8_t usbVCOMout[LCD_BUFF_LEN * 8];
 
-static uint8_t cir_buffer1[4 * CIR_LENGTH + 1];
-static uint8_t cir_buffer2[4 * CIR_LENGTH + 1];
-static uint8_t cir_buffer3[4 * CIR_LENGTH + 1];
-static uint8_t cir_buffer4[4 * CIR_LENGTH + 1];
+static uint8_t cir_buffer1[COMPLEX_BYTE_LEN * CIR_LENGTH + 1];
+static uint8_t cir_buffer2[COMPLEX_BYTE_LEN * CIR_LENGTH + 1];
+static uint8_t cir_buffer3[COMPLEX_BYTE_LEN * CIR_LENGTH + 1];
+static uint8_t cir_buffer4[COMPLEX_BYTE_LEN * CIR_LENGTH + 1];
 
 
 //extern dwt_config_t config2;
@@ -79,6 +79,57 @@ struct cir_tap_struct
 // 		//HalUsbWrite(send_buf, len);
 // 		return ret;
 // }
+
+
+
+
+//radio configuration structs, we need both channel 5 and 9 to do frequency hopping
+static const dwt_config_t config_ch5 = {
+    5,                		/* Channel number. */
+    DWT_PLEN_64,     		/* Preamble length. Used in TX only. */
+    DWT_PAC8,         		/* Preamble acquisition chunk size. Used in RX only. */
+    9,                		/* TX preamble code. Used in TX only. */
+    9,                		/* RX preamble code. Used in RX only. */
+    1,                		/* 0 to use standard 8 symbol SFD, 1 to use non-standard 8 symbol, 2 for non-standard 16 symbol SFD and 3 for 4z 8 symbol SDF type */
+    DWT_BR_6M8,       		/* Data rate. */
+    DWT_PHRMODE_STD,  		/* PHY header mode. */
+    DWT_PHRRATE_STD,  		/* PHY header rate. */
+    (64 + 1 + 8 - 8),    	/* SFD timeout (preamble length + 1 + SFD length - PAC size). Used in RX only. */
+    DWT_STS_MODE_OFF, 		/* STS disabled */
+    DWT_STS_LEN_64,   		/* STS length see allowed values in Enum dwt_sts_lengths_e */
+    DWT_PDOA_M0       		/* PDOA mode off */
+};
+
+static const dwt_config_t config_ch9 = {
+    9,                		/* Channel number. */
+    DWT_PLEN_64,     		/* Preamble length. Used in TX only. */
+    DWT_PAC8,         		/* Preamble acquisition chunk size. Used in RX only. */
+    9,                		/* TX preamble code. Used in TX only. */
+    9,                		/* RX preamble code. Used in RX only. */
+    1,                		/* 0 to use standard 8 symbol SFD, 1 to use non-standard 8 symbol, 2 for non-standard 16 symbol SFD and 3 for 4z 8 symbol SDF type */
+    DWT_BR_6M8,       		/* Data rate. */
+    DWT_PHRMODE_EXT,  		/* PHY header mode. */
+    DWT_PHRRATE_STD,  		/* PHY header rate. */
+    (64 + 1 + 8 - 8),    	/* SFD timeout (preamble length + 1 + SFD length - PAC size). Used in RX only. */
+    DWT_STS_MODE_OFF, 		/* STS disabled */
+    DWT_STS_LEN_64,   		/* STS length see allowed values in Enum dwt_sts_lengths_e */
+    DWT_PDOA_M0       		/* PDOA mode off */
+};
+
+static const dwt_txconfig_t txconfig_ch5 = {
+    0x34,           /* PG delay. */
+    0xfdfdfdfd,      /* TX power. */
+    0x0             /*PG count*/
+};
+
+static const dwt_txconfig_t txconfig_ch9 = {
+    0x34,           /* PG delay. */
+    0xfefefefe,     /* TX power. */
+    0x0             /*PG count*/
+};
+
+
+
 
 
 DummyStream* dummy = nullptr;
@@ -130,57 +181,6 @@ static uint8_t board_num = 3;
 
 
 
-//radio configuration structs, we need both channel 5 and 9 to do frequency hopping
-static const dwt_config_t config_ch5 = {
-    5,                		/* Channel number. */
-    DWT_PLEN_64,     		/* Preamble length. Used in TX only. */
-    DWT_PAC8,         		/* Preamble acquisition chunk size. Used in RX only. */
-    9,                		/* TX preamble code. Used in TX only. */
-    9,                		/* RX preamble code. Used in RX only. */
-    1,                		/* 0 to use standard 8 symbol SFD, 1 to use non-standard 8 symbol, 2 for non-standard 16 symbol SFD and 3 for 4z 8 symbol SDF type */
-    DWT_BR_6M8,       		/* Data rate. */
-    DWT_PHRMODE_STD,  		/* PHY header mode. */
-    DWT_PHRRATE_STD,  		/* PHY header rate. */
-    (64 + 1 + 8 - 8),    	/* SFD timeout (preamble length + 1 + SFD length - PAC size). Used in RX only. */
-    DWT_STS_MODE_OFF, 		/* STS disabled */
-    DWT_STS_LEN_64,   		/* STS length see allowed values in Enum dwt_sts_lengths_e */
-    DWT_PDOA_M0       		/* PDOA mode off */
-};
-
-static const dwt_config_t config_ch9 = {
-    9,                		/* Channel number. */
-    DWT_PLEN_64,     		/* Preamble length. Used in TX only. */
-    DWT_PAC8,         		/* Preamble acquisition chunk size. Used in RX only. */
-    9,                		/* TX preamble code. Used in TX only. */
-    9,                		/* RX preamble code. Used in RX only. */
-    1,                		/* 0 to use standard 8 symbol SFD, 1 to use non-standard 8 symbol, 2 for non-standard 16 symbol SFD and 3 for 4z 8 symbol SDF type */
-    DWT_BR_6M8,       		/* Data rate. */
-    DWT_PHRMODE_STD,  		/* PHY header mode. */
-    DWT_PHRRATE_STD,  		/* PHY header rate. */
-    (64 + 1 + 8 - 8),    	/* SFD timeout (preamble length + 1 + SFD length - PAC size). Used in RX only. */
-    DWT_STS_MODE_OFF, 		/* STS disabled */
-    DWT_STS_LEN_64,   		/* STS length see allowed values in Enum dwt_sts_lengths_e */
-    DWT_PDOA_M0       		/* PDOA mode off */
-};
-
-dwt_txconfig_t txconfig_ch5 = {
-    0x34,           /* PG delay. */
-    0xfdfdfdfd,      /* TX power. */
-    0x0             /*PG count*/
-};
-
-dwt_txconfig_t txconfig_ch9 = {
-    0x34,           /* PG delay. */
-    0xfefefefe,     /* TX power. */
-    0x0             /*PG count*/
-};
-
-
-
-
-
-
-
 void loop(void)
 {
 	// sets up the device to use the pins on the bottom left of the rPi header for serial communication.
@@ -193,7 +193,12 @@ void loop(void)
 	SPI = SPIClass(NRF_SPI2, SPI_MISO, SPI_CLK, SPI_MOSI);
 	SPI.begin();
 
-
+    //set up the backend components and feed them into the main DW3000 class
+	//uart = new DWUart(BAUD_RATE);
+    dummy = new DummyStream();
+    uart = new DWUart(*dummy);
+	port = new DW3000Port(&SPI, SPI_CS, DW_RST, DW_IRQ);
+	radio = new DW3000(uart, port);
 
     //hard reset
 	port->reset();
@@ -240,9 +245,9 @@ void loop(void)
 	// Configure transmit power
 	radio->dwt_configuretxrf(&txconfig_ch5);
 	// Set Work Network ID
-	radio->dwt_setpanid(NET_PANID);
+	//radio->dwt_setpanid(NET_PANID);
 	// Set own short address
-	radio->dwt_setaddress16(1);
+	//radio->dwt_setaddress16(1);
 	// Configure antenna delay
 	radio->dwt_setrxaftertxdelay(RX_ANT_DLY);
 	radio->dwt_settxantennadelay(TX_ANT_DLY);
@@ -279,7 +284,7 @@ void loop(void)
 		radio->dwt_starttx(DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
 
 		// Waiting for reception to complete
-		while (!((status_reg = radio->dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG_BIT_MASK | SYS_STATUS_ALL_RX_ERR)))
+		while (!((status_reg = radio->dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG_BIT_MASK | SYS_STATUS_ALL_RX_ERR | SYS_STATUS_ALL_RX_TO)))
 		{
 		};
 
@@ -422,6 +427,8 @@ void loop(void)
 
 			// OLED_ShowString(0,1,"Resp Fail");
 			radio->dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
+
+			Serial.println("RX Error");
 		}
 	}
 
@@ -459,24 +466,60 @@ static uint8_t uCurrentTrim_val = 19;
 
 static uint16_t addr = 2;
 
-int dw_main(void)
+void loop(void)
 {
+	// sets up the device to use the pins on the bottom left of the rPi header for serial communication.
+	Serial = Uart(NRF_UART0, UARTE0_UART0_IRQn, 31, 7);
+	Serial.begin(BAUD_RATE);
+	Serial.println("Begin");
+
+	// sets up the SPI connection to the DW3000 radio
+	SPI = SPIClass(NRF_SPI2, SPI_MISO, SPI_CLK, SPI_MOSI);
+	SPI.begin();
+
+
+	//set up the backend components and feed them into the main DW3000 class
+	//uart = new DWUart(BAUD_RATE);
+    dummy = new DummyStream();
+    uart = new DWUart(*dummy);
+	port = new DW3000Port(&SPI, SPI_CS, DW_RST, DW_IRQ);
+	radio = new DW3000(uart, port);
+
 
 	// RX_ANT_DLY = rfDelaysTREK[1];
 	// TX_ANT_DLY = rfDelaysTREK[1];
 
 	// Modify it to use our own code.
-	reset_DW1000();
+	//reset_DW1000();
 
-	SPI_ConfigFastRate(SPI_BaudRatePrescaler_32);
+	//hard reset
+	port->reset();
+
+	radio->dwt_softreset();
+
+	while (!radio->dwt_checkidlerc()) // Need to make sure DW IC is in IDLE_RC before proceeding
+	{
+		Serial.println("Idle failed");
+		delay(1000);
+	}
+
+	//SPI_ConfigFastRate(SPI_BaudRatePrescaler_32);
 
 	// Initialize the DW1000
-	if (dwt_initialise(DWT_LOADUCODE) == DWT_ERROR)
+	// uses DWT_LOADUCODE, which we don't have documentation for
+	if (radio->dwt_initialise(0) == DWT_ERROR)
 	{
 		while (1)
 		{
+			Serial.println("Init failed");
+			delay(1000);
 		};
 	}
+
+
+	//enable CIR collection
+	radio->dwt_configciadiag(DW_CIA_DIAG_LOG_ALL);
+
 
 	// Read crystal oscillator calibration parameters.
 	// dwt_xtaltrim(uCurrentTrim_val);
@@ -485,20 +528,22 @@ int dw_main(void)
 	// uCurrentTrim_val &= 31;
 
 	// Adjust the SPI to 18 MHz.
-	SPI_ConfigFastRate(SPI_BaudRatePrescaler_4);
+	//SPI_ConfigFastRate(SPI_BaudRatePrescaler_4);
+
+
 
 	// Configure the operating frequency
 	// config.txCode = 7 + addr;
 	// config.rxCode = 7 + addr;
-	radio->dwt_configure(&config);
+	radio->dwt_configure(&config_ch5);
 	// Activate the DW1000 status indicator.
 	radio->dwt_setleds(1);
 	// Configure transmit power
-	radio->dwt_configuretxrf(&txconfig2);
+	radio->dwt_configuretxrf(&txconfig_ch5);
 	// Set Work Network ID
 	radio->dwt_setpanid(NET_PANID);
 	// Set own short address
-	radio->dwt_setaddress16(addr);
+	//radio->dwt_setaddress16(addr);
 	// Configure antenna delay
 	radio->dwt_setrxaftertxdelay(RX_ANT_DLY);
 	radio->dwt_settxantennadelay(TX_ANT_DLY);
@@ -525,9 +570,9 @@ int dw_main(void)
 		radio->dwt_setrxtimeout(1000);
 		radio->dwt_setpreambledetecttimeout(0);
 		// Step3:Initiate reception immediately. The parameters of this function allow for a delayed start to reception; this can be optimized by delaying the receiver's activation to reduce energy consumption.
-		radio->dwt_rxenable(DWT_START_TX_IMMEDIATE);
+		radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
 
-		while (!((status_reg = radio->dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG_BIT_MASK | SYS_STATUS_ALL_RX_ERR)))
+		while (!((status_reg = radio->dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG_BIT_MASK | SYS_STATUS_ALL_RX_ERR | SYS_STATUS_ALL_RX_TO)))
 		{
 		};
 
@@ -564,7 +609,11 @@ int dw_main(void)
 				// Extract sequence number
 				msg_f_send.seqNum = msg_f->seqNum;
 
-				uint16_t fp_int1 = radio->dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
+				//uint16_t fp_int1 = radio->dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
+
+				dwt_rxdiag_t diagnostics = {};
+       			radio->dwt_readdiagnostics(&diagnostics);
+				uint16_t fp_int1 = diagnostics.ipatovFpIndex >> 6; //bit shifting removes the fractional part
 
 				//							if (fp_int1 > 757 || fp_int1 < 730)
 				//							{
@@ -611,7 +660,8 @@ int dw_main(void)
 					// Waiting for transmission to complete
 
 					// uint16_t fp_int1 = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
-					radio->dwt_readaccdata(cir_buffer1, CIR_LENGTH * 4, (fp_int1) * 4);
+					//radio->dwt_readaccdata(cir_buffer1, CIR_LENGTH * 4, (fp_int1) * 4);
+					radio->dwt_readaccdata(cir_buffer1, (COMPLEX_BYTE_LEN * CIR_LEN + 1), fp_int1);
 
 					// MUST WAIT!!!!!
 					while (!((status_reg = radio->dwt_read32bitreg(SYS_STATUS_ID)) & (SYS_STATUS_RXFCG_BIT_MASK | SYS_STATUS_ALL_RX_ERR)))
@@ -652,15 +702,22 @@ int dw_main(void)
 
 								// Extract timestamp information from the data packet payload.
 								//  50us
-								final_msg_get_ts(&msg_f->messageData[FINAL_MSG_POLL_TX_TS_IDX], &poll_tx_ts);
-								final_msg_get_ts(&msg_f->messageData[FINAL_MSG_RESP_RX_TS_IDX], &resp_rx_ts);
-								final_msg_get_ts(&msg_f->messageData[FINAL_MSG_FINAL_TX_TS_IDX], &final_tx_ts);
+								poll_tx_ts = final_msg_get_ts(&msg_f->messageData[FINAL_MSG_POLL_TX_TS_IDX]);
+								resp_rx_ts = final_msg_get_ts(&msg_f->messageData[FINAL_MSG_RESP_RX_TS_IDX]);
+								final_tx_ts = final_msg_get_ts(&msg_f->messageData[FINAL_MSG_FINAL_TX_TS_IDX]);
 
 								// dwt_readdiagnostics(&rx_diag2);
-								uint16_t fp_int2 = radio->dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
+								//uint16_t fp_int2 = radio->dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET) >> 6;
 								// uint16_t fp_int2 = rx_diag2.firstPath >> 6;
-								radio->dwt_readaccdata(cir_buffer2, CIR_LENGTH * 4, (fp_int2) * 4);
+
+								//TODO: find the raw register for this value
+								radio->dwt_readdiagnostics(&diagnostics);
+								uint16_t fp_int2 = diagnostics.ipatovFpIndex >> 6;
+
+								//radio->dwt_readaccdata(cir_buffer2, CIR_LENGTH * 4, (fp_int2) * 4);
 								// dwt_readaccdata(cir_buffer2, 4 * CIR_LENGTH, (fp_int2-6) * 4);
+								
+								radio->dwt_readaccdata(cir_buffer2, (COMPLEX_BYTE_LEN * CIR_LEN + 1), fp_int2);
 
 								uint32_t final2_rx_enable = (final_rx_ts + (430 * UUS_TO_DWT_TIME)) >> 8;
 
@@ -711,8 +768,13 @@ int dw_main(void)
 
 											// dwt_readdiagnostics(&rx_diag4);
 											// uint16_t fp_int4 = rx_diag4.firstPath >> 6;
-											uint16_t fp_int4 = radio->dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET);
-											radio->dwt_readaccdata(cir_buffer4, CIR_LENGTH * 4, ((fp_int4 >> 6)) * 4);
+											//uint16_t fp_int4 = radio->dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET);
+
+											radio->dwt_readdiagnostics(&diagnostics);
+											uint16_t fp_int4 = diagnostics.ipatovFpIndex >> 6;
+
+											radio->dwt_readaccdata(cir_buffer4, (COMPLEX_BYTE_LEN * CIR_LEN + 1), fp_int4);
+											//radio->dwt_readaccdata(cir_buffer4, CIR_LENGTH * 4, ((fp_int4 >> 6)) * 4);
 
 											// For distance calculation based on the TWR algorithm, you can refer to the video tutorial on 51uwb.cn.
 											poll_rx_ts_32 = (uint32_t)poll_rx_ts;
@@ -860,7 +922,7 @@ int dw_main(void)
 		else
 		{
 			/* Clear RX error events in the DW1000 status register. */
-			radio->dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR);
+			radio->dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR | SYS_STATUS_ALL_RX_TO);
 
 			//					if(msg_f_send.seqNum % 3 != 2){
 			//
@@ -877,10 +939,14 @@ int dw_main(void)
 			//							n = 0;
 			//						}
 			//					}
+
+			Serial.print("RX Error ");
+			Serial.println(status_reg, 2);
+			
 		}
 	}
 
-	return 0;
+	//return 0;
 }
 
 #endif
