@@ -835,6 +835,11 @@ void loop_initiator() {
         
         //Serial.println("Success");
 
+        //dwt_rxdiag_t diagnostics = {};
+        //radio->dwt_readdiagnostics(&diagnostics);
+        //uint16_t fp_index = diagnostics.ipatovF3 >> 6;
+
+
         uint16_t fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
 
         //read in the data
@@ -845,11 +850,12 @@ void loop_initiator() {
 
         CirDebugPacket cir_data = CirDebugPacket(incoming.get_payload());
 
+        Serial.println("A");
         print_cir_packet(wave_data);
         Serial.println();
         print_cir_packet(cir_data);
         Serial.println();
-
+        Serial.println("B");
 
 
 
@@ -859,7 +865,7 @@ void loop_initiator() {
     }
 
     digitalWrite(LED_D9, true); //LED off
-    delay(1000);
+    delay(100);
 
 }
 
