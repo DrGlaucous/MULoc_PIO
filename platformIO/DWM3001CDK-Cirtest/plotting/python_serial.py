@@ -32,16 +32,20 @@ tag_mag_ln, = magnitude_graph.plot([], [], color='b',)
 anchor_phase_ln, = phase_graph.plot([], [], color='r',)
 tag_phase_ln, = phase_graph.plot([], [], color='b',)
 
-canceled_phase_ln, = canceled_graph.plot([], [], color='g',)
+canceled_phase_ln, = canceled_graph.plot([], [], color='g',  marker='o')
+canceled_phase2_ln, = canceled_graph.plot([], [], color='r',  marker='o')
+canceled_phase3_ln, = canceled_graph.plot([], [], color='b',  marker='o')
 canceled_y_array: list[float] = []
 
 #pre-set limits if you know them, or auto-scale later
 #magnitude_graph.set_xlim(0, 20)
-#magnitude_graph.set_ylim(0, 3500)
+magnitude_graph.set_ylim(0, 3500)
 #phase_graph.set_xlim(0, 20)
 phase_graph.set_ylim(0, 8)
 
-canceled_graph.set_ylim(0, 8)
+#canceled_graph.set_ylim(0, 8)
+canceled_graph.set_ylim(-2, 2)
+canceled_graph.set_xlim(-2, 2)
 
 #take new x and y data and put it on the graph
 def update_plot_data(
@@ -49,7 +53,9 @@ def update_plot_data(
         tag_mag_x: list[float], tag_mag_y: list[float],
         anchor_phase_x: list[float], anchor_phase_y: list[float],
         tag_phase_x: list[float], tag_phase_y: list[float],
-        canceled_y: float
+        canceled_y: float,
+        canceled_y2: float,
+        canceled_y3: float,
         ):
 
     #ensure inputs are equal in length
@@ -68,8 +74,28 @@ def update_plot_data(
     for i in range(len(canceled_y_array)):
         canceled_x_vals.append(i)
 
-    canceled_phase_ln.set_xdata(canceled_x_vals)
-    canceled_phase_ln.set_ydata(canceled_y_array)
+    #canceled_phase_ln.set_xdata(canceled_x_vals)
+    #canceled_phase_ln.set_ydata(canceled_y_array)
+
+    #test: circle
+    x_val = math.cos(canceled_y)
+    y_val = math.sin(canceled_y)
+
+    canceled_phase_ln.set_xdata([0, x_val])
+    canceled_phase_ln.set_ydata([0, y_val])
+
+    x_val2 = math.cos(canceled_y + math.pi)
+    y_val2 = math.sin(canceled_y + math.pi)
+
+    x_val3 = math.cos(canceled_y2)
+    y_val3 = math.sin(canceled_y2)
+    x_val3_neg = math.cos(canceled_y2 + math.pi)
+    y_val3_neg = math.sin(canceled_y2 + math.pi)
+
+    canceled_phase2_ln.set_xdata([0, x_val2])
+    canceled_phase2_ln.set_ydata([0, y_val2])
+    canceled_phase3_ln.set_xdata([x_val3_neg, 0, x_val3])
+    canceled_phase3_ln.set_ydata([y_val3_neg, 0, y_val3])
 
     #update the data inside the line object directly
     anchor_mag_ln.set_xdata(anchor_mag_x)
@@ -229,6 +255,15 @@ try:
 
                         anchor_cir = parse_cir_line(parts[1])
                         tag_cir = parse_cir_line(parts[2])
+                        post_final_cir = parse_cir_line(parts[3])
+
+                        #this method is not supposed to handle this, but we're doing it anyways
+                        carrier_integrators = parse_cir_line(parts[4])
+                        frequency = 6489.6e6
+                        anchor_ci = carrier_integrators[0][0]
+                        tag_ci = carrier_integrators[1][0]
+                        #print(carrier_integrators[0][0] - carrier_integrators[1][0])
+
 
                         #phase wrap
                         for i in range(len(anchor_cir[0])):
@@ -236,6 +271,9 @@ try:
                                 anchor_cir[0][i] += 2 * math.pi
                             if(tag_cir[0][i] < 0):
                                 tag_cir[0][i] += 2 * math.pi
+                            if(post_final_cir[0][i] < 0):
+                                post_final_cir[0][i] += 2 * math.pi
+
 
 
 
@@ -249,7 +287,10 @@ try:
 
                         delta_cir = cancled_cir - last_canceled_cir
                         last_canceled_cir = cancled_cir
-                        print(cancled_cir)
+                        #print(cancled_cir)
+
+                        cancled_cir2 = anchor_cir[0][9] - tag_cir[0][9]
+                        cancled_cir2 = cancled_cir2 % (2 * math.pi)
 
                         #test: offset by 1/2 a phase if this happens
                         #if(delta_cir > math.pi * 0.5 and delta_cir < math.pi * 0.5):
@@ -262,7 +303,7 @@ try:
                                         x_vals, tag_cir[1], #tag mag
                                         x_vals, anchor_cir[0], #anchor phase
                                         x_vals, tag_cir[0], #tag phase
-                                        cancled_cir
+                                        cancled_cir, cancled_cir2, tag_cir[0][9]
                                         )
 
 

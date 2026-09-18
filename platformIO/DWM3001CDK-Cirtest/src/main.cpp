@@ -803,6 +803,7 @@ void loop_t_custom() {
 void loop_initiator() {
     //start with clean slate
     radio->clear_system_status();
+    radio->dwt_forcetrxoff();
 
     //ensure frequency is set to 5
     bool is_freq_5 = true;
@@ -832,6 +833,8 @@ void loop_initiator() {
     } while(response == 0);
 
     if(response == 1) {
+
+        radio->clear_system_status();
         
         //Serial.println("Success");
 
@@ -847,15 +850,41 @@ void loop_initiator() {
         wave_data.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
 
         auto incoming = get_packet();
+        CirDebugPacket remote_wave_data = CirDebugPacket(incoming.get_payload());
+        auto carrier_integrator_0 = radio->dwt_readcarrierintegrator();
 
-        CirDebugPacket cir_data = CirDebugPacket(incoming.get_payload());
+        //wait for post-final message
+        radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
+        response = 0;
+        do {
+            response = clone_check_for_rx();
+        } while(response == 0);
 
-        Serial.println("A");
-        print_cir_packet(wave_data);
-        Serial.println();
-        print_cir_packet(cir_data);
-        Serial.println();
-        Serial.println("B");
+        if(response == 1) {
+
+            uint16_t fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
+            CirDebugPacket post_wave_data = CirDebugPacket();
+            post_wave_data.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
+            auto carrier_integrator_1 = radio->dwt_readcarrierintegrator();
+
+            Serial.println("A");
+            print_cir_packet(wave_data);
+            Serial.println();
+            print_cir_packet(remote_wave_data);
+            Serial.println();
+            print_cir_packet(post_wave_data);
+            Serial.println();
+            Serial.print(carrier_integrator_0);
+            Serial.print(",");
+            Serial.print(carrier_integrator_1);
+            Serial.println();
+            Serial.println("B");
+        } else {
+            Serial.print("RX2 Error: ");
+            Serial.println(response);
+        }
+
+
 
 
 
@@ -865,7 +894,7 @@ void loop_initiator() {
     }
 
     digitalWrite(LED_D9, true); //LED off
-    delay(100);
+    delay(50);
 
 }
 
@@ -895,6 +924,8 @@ void loop_responder() {
         
         digitalWrite(LED_D9, false); //LED on 
 
+        radio->clear_system_status();
+
         //todo: I'd rather read this direct
         //dwt_rxdiag_t diagnostics = {};
         //radio->dwt_readdiagnostics(&diagnostics);
@@ -920,7 +951,16 @@ void loop_responder() {
         //.5 seconds = 500000
         set_outgoing_time(5000, radio->get_rx_timestamp_u64());
         if(send_packet(outgoing, DWT_START_TX_DELAYED)) {
-            digitalWrite(LED_D9, true); //LED off
+
+            radio->clear_system_status();
+
+
+            //do it again after another timespan
+            set_outgoing_time(80000, radio->get_rx_timestamp_u64());
+            if(send_packet(outgoing, DWT_START_TX_DELAYED)) {
+                digitalWrite(LED_D9, true); //LED off
+            }
+
         };
 
 
