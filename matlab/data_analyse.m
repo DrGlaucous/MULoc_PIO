@@ -91,6 +91,7 @@ end
 ch1_idx = sort([useful_idx,useful_idx+1]);
 ch3_idx = sort([useful_idx+2,useful_idx+3]);
 
+
 %% Clock drift estimation (carrier frequency offset)
 
 % Original clock drift estimates reported by DW1000 module

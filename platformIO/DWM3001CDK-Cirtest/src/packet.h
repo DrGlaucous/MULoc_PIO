@@ -136,7 +136,7 @@ class CirDebugPacket {
     public:
 
     //how many complex values to store
-    static const uint8_t VALUE_COUNT = 17;
+    static const uint8_t VALUE_COUNT = 16;
 
     //the size of a single complex value
     static const uint8_t SINGLE_LENGTH = 6;
@@ -144,12 +144,15 @@ class CirDebugPacket {
     //the total size of the stored complex ACC values in bytes
     static const uint8_t ACC_LENGTH = VALUE_COUNT * SINGLE_LENGTH;
 
-    //the total size of the packet
-    static const uint8_t TOTAL_LENGTH = ACC_LENGTH + 2;
+    //the total size of the packet (max: 107 bytes)
+    static const uint8_t TOTAL_LENGTH = ACC_LENGTH + 2 + 3 + 2;
 
     //offsets
-    static const uint8_t ACC_PAYLOAD_ID = 2; //holds the samples
-    static const uint8_t ACC_OFFSET_ID = 0; //holds the value in the ACC buffer where the first sample is read
+    static const uint8_t ACC_PAYLOAD_ID = 7; //holds the samples
+    static const uint8_t ACC_OFFSET_ID = 0; //holds the value in the ACC buffer where the first sample is read (2 bytes)
+    static const uint8_t CARRIER_INTEGRATOR_OFFSET_ID = 2; //3 bytes, holds the carrier integrator value
+    static const uint8_t PHASE_OF_ARRIVAL_OFFSET_ID = 5; //2 bytes, holds the ipatovPOA value
+
 
     private:
 
@@ -166,6 +169,7 @@ class CirDebugPacket {
 
     //store VALUE_COUNT worth of accumulator data into this packet's internal buffer, starting at acc_offset
     void read_acc_data(DW3000* radio, uint16_t acc_offset) {
+
 
         //need this because we have that extra dummy byte at the start of the read
         uint8_t cir_buffer[ACC_LENGTH + 1] = {};
@@ -224,6 +228,28 @@ class CirDebugPacket {
     uint16_t get_acc_offset() const {
         return (uint16_t)PacketHelpers::byte_array_to_num(payload + ACC_OFFSET_ID, 2);
     }
+
+    //get and set the carrier integrator from dwt_readcarrierintegrator
+    void set_carrier_integrator(int32_t carrier_integrator) {
+        //21 bits, can store in the final 3 bytes of space (max 107)
+        PacketHelpers::num_to_byte_array(carrier_integrator, payload + CARRIER_INTEGRATOR_OFFSET_ID, 3);
+    }
+    int32_t get_carrier_integrator() const {
+        return (int32_t)PacketHelpers::byte_array_to_num(payload + CARRIER_INTEGRATOR_OFFSET_ID, 3);
+    }
+
+    //get and set the phase angle of arrival from dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1), does sign extension before storing
+    void set_poa(uint16_t ip_poa) {
+        int16_t ip_poa_signed = (int16_t)((ip_poa & 0x3FFF)|((ip_poa & 0x2000)?0xC000:0x0000));
+
+        //14 bits, see page 180
+        PacketHelpers::num_to_byte_array(ip_poa_signed, payload + PHASE_OF_ARRIVAL_OFFSET_ID, 2);
+    }
+    int16_t get_poa() const {
+        return (int16_t)PacketHelpers::byte_array_to_num(payload + PHASE_OF_ARRIVAL_OFFSET_ID, 2);
+    }
+
+
 
 
     //return the whole flight-ready packet

@@ -32,10 +32,13 @@ tag_mag_ln, = magnitude_graph.plot([], [], color='b',)
 anchor_phase_ln, = phase_graph.plot([], [], color='r',)
 tag_phase_ln, = phase_graph.plot([], [], color='b',)
 
-canceled_phase_ln, = canceled_graph.plot([], [], color='g',  marker='o')
-canceled_phase2_ln, = canceled_graph.plot([], [], color='r',  marker='o')
-canceled_phase3_ln, = canceled_graph.plot([], [], color='b',  marker='o')
+
+canceled_phase2_ln, = canceled_graph.plot([], [], color='r')#,  marker='o')
+canceled_phase3_ln, = canceled_graph.plot([], [], color='b')#,  marker='o')
+canceled_phase_ln, = canceled_graph.plot([], [], color='g')#,  marker='o')
 canceled_y_array: list[float] = []
+phase_anchor_array: list[float] = []
+phase_tag_array: list[float] = []
 
 #pre-set limits if you know them, or auto-scale later
 #magnitude_graph.set_xlim(0, 20)
@@ -43,9 +46,12 @@ magnitude_graph.set_ylim(0, 3500)
 #phase_graph.set_xlim(0, 20)
 phase_graph.set_ylim(0, 8)
 
-#canceled_graph.set_ylim(0, 8)
-canceled_graph.set_ylim(-2, 2)
-canceled_graph.set_xlim(-2, 2)
+
+if False:
+    canceled_graph.set_ylim(-2, 2)
+    canceled_graph.set_xlim(-2, 2)
+else:
+    canceled_graph.set_ylim(0, 6.3)
 
 #take new x and y data and put it on the graph
 def update_plot_data(
@@ -67,35 +73,48 @@ def update_plot_data(
         return
 
     canceled_y_array.append(canceled_y)
-    if(len(canceled_y_array) > 50):
+    phase_anchor_array.append(canceled_y2)
+    phase_tag_array.append(canceled_y3)
+
+    if(len(canceled_y_array) > 150):
         canceled_y_array.pop(0)
+        phase_anchor_array.pop(0)
+        phase_tag_array.pop(0)
 
     canceled_x_vals: list[float] = []
     for i in range(len(canceled_y_array)):
         canceled_x_vals.append(i)
 
-    #canceled_phase_ln.set_xdata(canceled_x_vals)
-    #canceled_phase_ln.set_ydata(canceled_y_array)
+    canceled_phase_ln.set_xdata(canceled_x_vals)
+    canceled_phase_ln.set_ydata(canceled_y_array)
+
+    #canceled_phase2_ln.set_xdata(canceled_x_vals)
+    #canceled_phase2_ln.set_ydata(phase_anchor_array)
+    #canceled_phase3_ln.set_xdata(canceled_x_vals)
+    #canceled_phase3_ln.set_ydata(phase_tag_array)
 
     #test: circle
-    x_val = math.cos(canceled_y)
-    y_val = math.sin(canceled_y)
+    if False:
+        x_val = math.cos(canceled_y)
+        y_val = math.sin(canceled_y)
 
-    canceled_phase_ln.set_xdata([0, x_val])
-    canceled_phase_ln.set_ydata([0, y_val])
+        canceled_phase_ln.set_xdata([0, x_val])
+        canceled_phase_ln.set_ydata([0, y_val])
 
-    x_val2 = math.cos(canceled_y + math.pi)
-    y_val2 = math.sin(canceled_y + math.pi)
+        x_val2 = math.cos(canceled_y + math.pi)
+        y_val2 = math.sin(canceled_y + math.pi)
 
-    x_val3 = math.cos(canceled_y2)
-    y_val3 = math.sin(canceled_y2)
-    x_val3_neg = math.cos(canceled_y2 + math.pi)
-    y_val3_neg = math.sin(canceled_y2 + math.pi)
+        x_val3 = math.cos(canceled_y2)
+        y_val3 = math.sin(canceled_y2)
+        x_val3_neg = math.cos(canceled_y2 + math.pi)
+        y_val3_neg = math.sin(canceled_y2 + math.pi)
 
-    canceled_phase2_ln.set_xdata([0, x_val2])
-    canceled_phase2_ln.set_ydata([0, y_val2])
-    canceled_phase3_ln.set_xdata([x_val3_neg, 0, x_val3])
-    canceled_phase3_ln.set_ydata([y_val3_neg, 0, y_val3])
+        canceled_phase2_ln.set_xdata([0, x_val2])
+        canceled_phase2_ln.set_ydata([0, y_val2])
+        #canceled_phase3_ln.set_xdata([x_val3_neg, 0, x_val3])
+        #canceled_phase3_ln.set_ydata([y_val3_neg, 0, y_val3])
+
+
 
     #update the data inside the line object directly
     anchor_mag_ln.set_xdata(anchor_mag_x)
@@ -259,14 +278,49 @@ try:
 
                         #this method is not supposed to handle this, but we're doing it anyways
                         carrier_integrators = parse_cir_line(parts[4])
-                        frequency = 6489.6e6
+
+                        #constants pulled from the qorvo API
+                        FREQ_OFFSET_MULTIPLIER = (998.4e6 / 2.0 / 1024.0 / 131072.0)
+                        HERTZ_TO_PPM_MULTIPLIER_CHAN_5 = (-1.0e6 / 6489.6e6)
+
+                        #read in carrier integrators and first path index values
                         anchor_ci = carrier_integrators[0][0]
                         tag_ci = carrier_integrators[1][0]
-                        #print(carrier_integrators[0][0] - carrier_integrators[1][0])
+                        anchor2_ci = carrier_integrators[0][1]
+                        #fp_index - 8 is where we start reading our samples
+                        tag_fp_index = carrier_integrators[1][1] - 8
+                        anchor_fp_index = carrier_integrators[0][2] - 8
+                        anchor2_fp_index = carrier_integrators[1][2] - 8
+
+                        #phase of arrival
+                        ip_poa_anchor = float(carrier_integrators[0][3]) / float(1 << 11)
+                        ip_poa_tag = float(carrier_integrators[1][3]) / float(1 << 11)
 
 
-                        #phase wrap
+                        #calculate rotations per sample for de-rotating them.
+                        #frequency = 6489.6e6
+                        tag_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * tag_ci
+                        anchor_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * anchor_ci
+                        anchor2_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * anchor2_ci
+
+                        #offset_ratio = tag_second_ci * FREQ_OFFSET_MULTIPLIER * HERTZ_TO_PPM_MULTIPLIER_CHAN_5# / 1e6
+                        tag_rotation_per_sample = 2 * math.pi * tag_freq_offset_hz * (1. / 499.22e6)
+                        anchor_rotation_per_sample = 2 * math.pi * anchor_freq_offset_hz * (1. / 499.22e6)
+                        anchor2_rotation_per_sample = 2 * math.pi * anchor2_freq_offset_hz * (1. / 499.22e6)
+
+
+                        #phase wrap and de-rotate
                         for i in range(len(anchor_cir[0])):
+
+                            #anchor_cir[0][i] = anchor_cir[0][i] - ip_poa_anchor 
+                            #tag_cir[0][i] = tag_cir[0][i] - ip_poa_tag
+
+                            anchor_cir[0][i] = anchor_cir[0][i] - (anchor_fp_index + i) * anchor_rotation_per_sample
+                            tag_cir[0][i] = tag_cir[0][i] - (tag_fp_index + i) * tag_rotation_per_sample
+
+                            #post_final_cir[0][i] = post_final_cir[0][i] - (anchor2_fp_index + i) * anchor2_rotation_per_sample
+
+
                             if(anchor_cir[0][i] < 0):
                                 anchor_cir[0][i] += 2 * math.pi
                             if(tag_cir[0][i] < 0):
@@ -277,20 +331,37 @@ try:
 
 
 
+
+
                         #I think I can use collect to make this go faster... oh, well.
                         x_vals: list[float] = []
                         for i in range(len(anchor_cir[0])):
                             x_vals.append(float(i))
 
-                        cancled_cir = anchor_cir[0][9] + tag_cir[0][9]
+                        cancled_cir = anchor_cir[0][9] + tag_cir[0][9]# - post_final_cir[0][9]
                         cancled_cir = cancled_cir % (2 * math.pi)
 
-                        delta_cir = cancled_cir - last_canceled_cir
-                        last_canceled_cir = cancled_cir
-                        #print(cancled_cir)
+                        inverted_cir = (cancled_cir + math.pi) % (2 * math.pi)
 
-                        cancled_cir2 = anchor_cir[0][9] - tag_cir[0][9]
-                        cancled_cir2 = cancled_cir2 % (2 * math.pi)
+                        delta_cir = cancled_cir - last_canceled_cir
+
+                        orig_cir = cancled_cir
+
+
+                        #if(abs(last_canceled_cir - inverted_cir) < abs(last_canceled_cir - cancled_cir)):
+                        #    cancled_cir = inverted_cir
+                        #    print(f"Should invert {inverted_cir}")
+                        
+                        last_canceled_cir = orig_cir
+
+
+
+                        #cancled_cir2 = anchor_cir[0][9] - tag_cir[0][9] + post_final_cir[0][9]
+                        #cancled_cir2 = cancled_cir2 % (2 * math.pi)
+
+
+
+                        
 
                         #test: offset by 1/2 a phase if this happens
                         #if(delta_cir > math.pi * 0.5 and delta_cir < math.pi * 0.5):
@@ -303,7 +374,7 @@ try:
                                         x_vals, tag_cir[1], #tag mag
                                         x_vals, anchor_cir[0], #anchor phase
                                         x_vals, tag_cir[0], #tag phase
-                                        cancled_cir, cancled_cir2, tag_cir[0][9]
+                                        cancled_cir, inverted_cir, tag_cir[0][9]
                                         )
 
 

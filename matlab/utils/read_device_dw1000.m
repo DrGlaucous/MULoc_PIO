@@ -71,28 +71,31 @@ end
 % Convert cell array to numeric matrix for efficient processing
 data = cell2mat(data);
 
+%only time of flight, CIR phase angle, and carrier frequency offset are used.
+%we derive phase angle from phase_cali and complex
+
 % Initialize data matrices
 data_len = size(data, 1);
-device.rx_times = zeros(anchor_num, data_len); %time of flight
-device.poa = zeros(anchor_num, data_len); %CIR phase angle
+device.rx_times = zeros(anchor_num, data_len); %time of flight -----------
+device.poa = zeros(anchor_num, data_len); %CIR phase angle --------------
 device.abs = zeros(anchor_num, data_len); %CIR phase magnitude
-device.complex = zeros(anchor_num, data_len); %complex number from the two above (actually, the two above were calculated with this)
-device.phase_cali = zeros(anchor_num, data_len); %phase calibration offset
-device.rssi = zeros(anchor_num, data_len); %signal strength
+device.complex = zeros(anchor_num, data_len); %complex number from the two above (actually, the two above were calculated with this) ===
+device.phase_cali = zeros(anchor_num, data_len); %phase calibration offset, only used in changing the poa angle ===
+device.rssi = zeros(anchor_num, data_len); %signal strength (unused)
 if device_type == 1
-	device.cfo = zeros(anchor_num, data_len); %carrier frequency offset
+	device.cfo = zeros(anchor_num, data_len); %carrier frequency offset --------------
 end
 
 device.idx = data(:, end);  % Store index values
 
 
 %data format for an anchor, there are 3 per row, which are the other three anchors
-%[CIR real (signed int)]    [CIR IM (signed int)]    [phase calib]    [rx preamble]    [gain]    [Time-of-flight]    [the ID of the anchor we were talking to]
-%039d,                      0342,                    7f,              1f,              0019,     3534c61dc9,         1
+%[CIR real (signed int)]    [CIR IM (signed int)]    [phase calib]    [rx preamble (unused)]    [gain (unused)]    [Time-of-flight]    [the ID of the anchor we were talking to]
+%039d,                      0342,                    7f,              1f,                       0019,              3534c61dc9,         1
 
 %data format for a tag, there are 4 per row, which are all four other anchors
-%[CIR real (signed int)]    [CIR IM (signed int)]    [phase calib]    [rx preamble]    [gain]    [Time-of-flight]    [carrier frequency offset]    [the ID of the anchor we were talking to]
-%0389,                      f6f9,                    01,              3b,              01a1,     93412952a4,         00000064,                     0
+%[CIR real (signed int)]    [CIR IM (signed int)]    [phase calib]    [rx preamble (unused)]    [gain (unused)]    [Time-of-flight]    [carrier frequency offset]    [the ID of the anchor we were talking to]
+%0389,                      f6f9,                    01,              3b,                       01a1,              93412952a4,         00000064,                     0
 
 
 % Process each anchor's data entries
@@ -118,7 +121,7 @@ for i = 1:device_num
 	device.abs(idx, :) = abs(device.complex(idx, :));
 	device.poa(idx, :) = angle(device.complex(idx, :));
 
-	% Extract and store phase calibration data (nothing special done here)
+	% Extract and store phase calibration data (used to apply an offset to device.poa)
 	device.phase_cali(idx, :) = data(:, base_col + 3)';
 
 	%this is calculated, but never read or used
@@ -131,9 +134,9 @@ for i = 1:device_num
 	power(power > -88) = power(power > -88) + (power(power > -88)+88)*corrFac;
 	device.rssi(idx, :) = power;
 
-	% Apply phase calibration offset
-	device.poa(idx, :) = device.poa(idx, :) - ...
-		device.phase_cali(idx, :)/128 * 2*pi;
+	% Apply phase calibration offset using phase_cali
+	%device.poa(idx, :) = device.poa(idx, :) - ...
+	%	device.phase_cali(idx, :)/128 * 2*pi;
 
 	% Process device-specific timing data
 	if device_type == 1  % Tag data processing
@@ -144,7 +147,7 @@ for i = 1:device_num
 		temp = data(:, base_col + 7);
 		temp(temp > 2^31) = temp(temp > 2^31) - 2^32;  % Signed conversion
 
-		%some weird multiplication stuff
+		%some weird multiplication stuff, explained in the manual
 		device.cfo(idx, :) = -temp' * (998.4e6/2.0/1024.0/131072.0);
 
 	else  % Anchor data processing

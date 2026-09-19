@@ -842,12 +842,22 @@ void loop_initiator() {
         //radio->dwt_readdiagnostics(&diagnostics);
         //uint16_t fp_index = diagnostics.ipatovF3 >> 6;
 
+        //test: compare these values
+        //dwt_rxdiag_t diagnostics = {};
+        //radio->dwt_readdiagnostics(&diagnostics);
+        //uint16_t ip_poa = diagnostics.ipatovPOA;
+        uint16_t ip_poa = radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1);
+        //convert to signed
+        int16_t ip_poa_signed = (int16_t)((ip_poa & 0x3FFF)|((ip_poa & 0x2000)?0xC000:0x0000));
+        //float ip_poa_radians = (float)ip_poa_signed / (float)(1<<11);
 
-        uint16_t fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
+
+
+        uint16_t fp_index_0 = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
 
         //read in the data
         CirDebugPacket wave_data = CirDebugPacket();
-        wave_data.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
+        wave_data.read_acc_data(radio, fp_index_0 - (CirDebugPacket::VALUE_COUNT / 2));
 
         auto incoming = get_packet();
         CirDebugPacket remote_wave_data = CirDebugPacket(incoming.get_payload());
@@ -862,9 +872,21 @@ void loop_initiator() {
 
         if(response == 1) {
 
-            uint16_t fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
+
+
+
+
+            uint16_t fp_index_1 = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
             CirDebugPacket post_wave_data = CirDebugPacket();
-            post_wave_data.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
+
+            uint16_t fp_index_tag = remote_wave_data.get_acc_offset();
+            auto carrier_integrator_tag = convert_u24_to_i24(remote_wave_data.get_carrier_integrator());
+
+            int16_t ip_poa_tag = remote_wave_data.get_poa();
+
+
+
+            post_wave_data.read_acc_data(radio, fp_index_1 - (CirDebugPacket::VALUE_COUNT / 2));
             auto carrier_integrator_1 = radio->dwt_readcarrierintegrator();
 
             Serial.println("A");
@@ -873,10 +895,28 @@ void loop_initiator() {
             print_cir_packet(remote_wave_data);
             Serial.println();
             print_cir_packet(post_wave_data);
+
             Serial.println();
             Serial.print(carrier_integrator_0);
             Serial.print(",");
+            Serial.print(carrier_integrator_tag);
+            Serial.print(",");
+
             Serial.print(carrier_integrator_1);
+            Serial.print(",");
+            Serial.print(fp_index_tag);
+            Serial.print(",");
+
+            Serial.print(fp_index_0);
+            Serial.print(",");
+            Serial.print(fp_index_1);
+            Serial.print(",");
+
+            Serial.print(ip_poa_signed);
+            Serial.print(",");
+            Serial.print(ip_poa_tag);
+
+
             Serial.println();
             Serial.println("B");
         } else {
@@ -938,6 +978,11 @@ void loop_responder() {
         //read in the data
         CirDebugPacket wave_data = CirDebugPacket();
         wave_data.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
+
+        //store carrier integrator for reverse compensation later
+        wave_data.set_carrier_integrator(radio->dwt_readcarrierintegrator());
+        //store the phase of arrival too
+        wave_data.set_poa(radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1));
 
 
         UWBPacket outgoing = UWBPacket(
