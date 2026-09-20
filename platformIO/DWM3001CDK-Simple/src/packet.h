@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "dw3000.h"
 
 //handles a generic UWB packet for ranging and data transfer.
 //I'm trying to be IEEE 802.15.4-2015 compliant, so I'm limiting myself to 127 bytes total
@@ -22,7 +23,6 @@ typedef enum RangingFrameNum {
     Request = 0,
     Response = 1,
     Final = 2,
-    PostFinal = 3,
 } RangingFrameNum;
 
 
@@ -71,15 +71,14 @@ class RangingPacket {
     public:
     
     //times are 40 bits long
-    static const uint8_t TOTAL_LENGTH = 5 + 5 + 1 + 1 + 4 + 4;
+    static const uint8_t TOTAL_LENGTH = 5 + 5 + 1;
 
     //see page 249 to see how these packets are structured
     static const uint8_t TIME_REPLY_U64_ID = 0; //the total time it took from getting a packet to sending out a response
     static const uint8_t TIME_ROUND_U64_ID = 5; //the round trip time for the first leg of the DSTWR (we don't need this for single-sided ranging)
     static const uint8_t FRAME_NO_ID = 10; //used to determine what stage of the ranging process we're in
-    static const uint8_t TX_NO_ID = 11; //used to determine what order this packet belongs in
-    static const uint8_t CIR_REAL_ID = 12;
-    static const uint8_t CIR_IMG_ID = 16;
+
+
 
     private:
     //packet format: [Time reply][Time round][frame number]
@@ -89,25 +88,13 @@ class RangingPacket {
     public:
 
     //construct from individual components
-    RangingPacket(
-        uint64_t time_reply,
-        uint64_t time_round,
-        RangingFrameNum frame_no,
-        uint8_t tx_no,
-        uint32_t cir_real,
-        uint32_t cir_img
-        ) {
+    RangingPacket(uint64_t time_reply, uint64_t time_round, RangingFrameNum frame_no) {
 
         //not 8-byte aligned, so we have to do bytewise copy
         PacketHelpers::num_to_byte_array(time_reply, payload + TIME_REPLY_U64_ID, 5);
         PacketHelpers::num_to_byte_array(time_round, payload + TIME_ROUND_U64_ID, 5);
 
         payload[FRAME_NO_ID] = frame_no;
-        payload[TX_NO_ID] = tx_no;
-
-        PacketHelpers::num_to_byte_array(cir_real, payload + CIR_REAL_ID, 4);
-        PacketHelpers::num_to_byte_array(cir_img, payload + CIR_IMG_ID, 4);
-
 
     }
 
@@ -131,21 +118,6 @@ class RangingPacket {
         return (RangingFrameNum)payload[FRAME_NO_ID];
     }
 
-    //return the tx number
-    uint8_t get_tx_no() const {
-        return payload[TX_NO_ID];
-    }
-
-    //return the real part of the CIR
-    uint32_t get_cir_real() const {
-        return (uint32_t)PacketHelpers::byte_array_to_num(payload + CIR_REAL_ID, 4);
-    }
-
-    //return the imaginary part of the CIR
-    uint32_t get_cir_imaginary() const {
-        return (uint32_t)PacketHelpers::byte_array_to_num(payload + CIR_IMG_ID, 4);
-    }
-
     //return the whole flight-ready packet
     const uint8_t* get_compiled() const {
         return payload;
@@ -157,6 +129,139 @@ class RangingPacket {
 
 };
 
+
+//get the complex values around the CIR
+class CirDebugPacket {
+
+    public:
+
+    //how many complex values to store
+    static const uint8_t VALUE_COUNT = 16;
+
+    //the size of a single complex value
+    static const uint8_t SINGLE_LENGTH = 6;
+
+    //the total size of the stored complex ACC values in bytes
+    static const uint8_t ACC_LENGTH = VALUE_COUNT * SINGLE_LENGTH;
+
+    //the total size of the packet (max: 107 bytes)
+    static const uint8_t TOTAL_LENGTH = ACC_LENGTH + 2 + 3 + 2;
+
+    //offsets
+    static const uint8_t ACC_PAYLOAD_ID = 7; //holds the samples
+    static const uint8_t ACC_OFFSET_ID = 0; //holds the value in the ACC buffer where the first sample is read (2 bytes)
+    static const uint8_t CARRIER_INTEGRATOR_OFFSET_ID = 2; //3 bytes, holds the carrier integrator value
+    static const uint8_t PHASE_OF_ARRIVAL_OFFSET_ID = 5; //2 bytes, holds the ipatovPOA value
+
+
+    private:
+
+    uint8_t payload[TOTAL_LENGTH] = {};
+
+    public:
+
+    CirDebugPacket() {}
+
+    //construct from byte array
+    CirDebugPacket(const uint8_t* payload) {
+        memcpy(this->payload, payload, TOTAL_LENGTH);
+    }
+
+    //store VALUE_COUNT worth of accumulator data into this packet's internal buffer, starting at acc_offset
+    void read_acc_data(DW3000* radio, uint16_t acc_offset) {
+
+
+        //need this because we have that extra dummy byte at the start of the read
+        uint8_t cir_buffer[ACC_LENGTH + 1] = {};
+        //read it in
+        radio->dwt_readaccdata(cir_buffer, ACC_LENGTH + 1, acc_offset);
+        //copy it to internal
+        memcpy(payload + ACC_PAYLOAD_ID, cir_buffer + 1, ACC_LENGTH);
+
+        set_acc_offset(acc_offset);
+
+    }
+
+    //set the complex number at the given index
+    bool set_complex_at(uint8_t index, uint32_t real, uint32_t img) {
+        if(index > VALUE_COUNT) {
+            return false;
+        }
+
+        //set reals
+        payload[ACC_PAYLOAD_ID + (index * SINGLE_LENGTH) + 0] = (real >> 0) & 0xFF; //lo
+        payload[ACC_PAYLOAD_ID + (index * SINGLE_LENGTH) + 1] = (real >> 8) & 0xFF; //mid
+        payload[ACC_PAYLOAD_ID + (index * SINGLE_LENGTH) + 2] = (real >> 16) & 0xFF; //high
+
+        //set imgs
+        payload[ACC_PAYLOAD_ID + (index * SINGLE_LENGTH) + 3] = (img >> 0) & 0xFF; //lo
+        payload[ACC_PAYLOAD_ID + (index * SINGLE_LENGTH) + 4] = (img >> 8) & 0xFF; //mid
+        payload[ACC_PAYLOAD_ID + (index * SINGLE_LENGTH) + 5] = (img >> 16) & 0xFF; //high
+
+        return true;
+
+    }
+
+    //ge the complex number at the current index
+    bool get_complex_at(uint8_t index, uint32_t* real, uint32_t* img) const {
+        if(index > VALUE_COUNT || real == nullptr || img == nullptr) {
+            return false;
+        }
+
+        *real = payload[ACC_PAYLOAD_ID + (index * SINGLE_LENGTH) + 0] << 0
+        | payload[ACC_PAYLOAD_ID + (index * SINGLE_LENGTH) + 1] << 8
+        | payload[ACC_PAYLOAD_ID + (index * SINGLE_LENGTH) + 2] << 16;
+
+        *img = payload[ACC_PAYLOAD_ID + (index * SINGLE_LENGTH) + 3] << 0
+        | payload[ACC_PAYLOAD_ID + (index * SINGLE_LENGTH) + 4] << 8
+        | payload[ACC_PAYLOAD_ID + (index * SINGLE_LENGTH) + 5] << 16;
+
+        return true;
+    }
+
+
+    //set and get the offset in the accdata this packet contains
+    void set_acc_offset(uint16_t acc_offset) {
+        PacketHelpers::num_to_byte_array(acc_offset, payload + ACC_OFFSET_ID, 2);
+    }
+
+    uint16_t get_acc_offset() const {
+        return (uint16_t)PacketHelpers::byte_array_to_num(payload + ACC_OFFSET_ID, 2);
+    }
+
+    //get and set the carrier integrator from dwt_readcarrierintegrator
+    void set_carrier_integrator(int32_t carrier_integrator) {
+        //21 bits, can store in the final 3 bytes of space (max 107)
+        PacketHelpers::num_to_byte_array(carrier_integrator, payload + CARRIER_INTEGRATOR_OFFSET_ID, 3);
+    }
+    int32_t get_carrier_integrator() const {
+        return (int32_t)PacketHelpers::byte_array_to_num(payload + CARRIER_INTEGRATOR_OFFSET_ID, 3);
+    }
+
+    //get and set the phase angle of arrival from dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1), does sign extension before storing
+    void set_poa(uint16_t ip_poa) {
+        int16_t ip_poa_signed = (int16_t)((ip_poa & 0x3FFF)|((ip_poa & 0x2000)?0xC000:0x0000));
+
+        //14 bits, see page 180
+        PacketHelpers::num_to_byte_array(ip_poa_signed, payload + PHASE_OF_ARRIVAL_OFFSET_ID, 2);
+    }
+    int16_t get_poa() const {
+        return (int16_t)PacketHelpers::byte_array_to_num(payload + PHASE_OF_ARRIVAL_OFFSET_ID, 2);
+    }
+
+
+
+
+    //return the whole flight-ready packet
+    const uint8_t* get_compiled() const {
+        return payload;
+    }
+
+    uint8_t get_compiled_len() const {
+        return TOTAL_LENGTH;
+    }
+
+};
 
 
 //part of the shared token ring of packets between the 4 anchors, there are three of 3 per transmission

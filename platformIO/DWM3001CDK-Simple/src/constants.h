@@ -6,20 +6,24 @@
 //true if the device is a tag
 //#define TAG
 
-//not used for anything other than the token ring packets, keeping it around in case we need it though
+//needs to be changed for each anchor to do proper scheduling
+#define ANCHOR_ID 1
+
+//max anchor count
 #define ANCHOR_NUM 2
-#define ANCHOR_ID 0
 
 //we need to calibrate the board in order to get these
 #define RX_ANT_DELAY 16385
 #define TX_ANT_DELAY 16385
 
-//how long RX mode will be on before we stop listening (in milliseconds)
+//time after sending a packet before enabling RX mode
+#define RX_AFTER_TX_DELAY 450
+//how long RX mode will be on before we stop listening
 #define RX_TIMEOUT 2500
 
 //the time in microseconds to process an incoming packet and send it back out
 //this value varies between MCUs, so it must be found for each new one (SPI speeds eat most of this. I'm currently limited to 8Mhz with the NRF52833)
-#define TURNAROUND_TIME_US 4000
+#define TURNAROUND_TIME_US 8000
 //ditto, but add to that the time it takes the radio to chang efrequencies
 #define TURNAROUND_HOP_TIME_US 4000
 

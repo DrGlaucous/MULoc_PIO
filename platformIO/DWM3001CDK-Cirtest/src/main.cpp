@@ -215,7 +215,17 @@ int wait_for_message_with_timeout(uint32_t timeout_ms, bool no_timeout = false) 
 
 //set the radio's output channel
 void set_channel_config(bool is_freq_5) {
+
+    //force into ILDE_RC
     radio->dwt_forcetrxoff();
+
+    //enable pll prebuffer (required for channel 5 to properly lock to the incoming phase)
+    //page 42 of the API guide outlines this method, it says it should be changed in IDLE_RC mode, but putting int below the dwt_configure() calls below didn't seem to hurt anything
+    radio->dwt_setpllrxprebufen(dwt_pll_prebuf_cfg_e::DWT_PLL_RX_PREBUF_ENABLE);
+
+    //force it to log important telemetry
+    radio->dwt_configciadiag(DW_CIA_DIAG_LOG_ALL);
+
     if(is_freq_5) {
         //Serial.print("CHN: 5 ");
         //Serial.print(" ");
@@ -229,10 +239,6 @@ void set_channel_config(bool is_freq_5) {
         while(radio->dwt_configure(&config_ch9) != DWT_SUCCESS);
         radio->dwt_configuretxrf(&txconfig_ch9);
     }
-    //enable pll prebuffer
-    radio->dwt_setpllrxprebufen(dwt_pll_prebuf_cfg_e::DWT_PLL_RX_PREBUF_ENABLE);
-    //force it to log important telemetry
-    radio->dwt_configciadiag(DW_CIA_DIAG_LOG_ALL);
 }
 
 //set the time at which the next transaction should happen
@@ -318,10 +324,6 @@ void loop_test() {
 }
 
 
-
-
-
-///////////////////////////////////////////////////////wrappers
 
 bool is_freq_5 = true;
 

@@ -147,43 +147,47 @@ UWBPacket get_packet() {
 //check for gotten frame, returns 0 on nothing, 1 on success, 2 on bad checksum, 3 on error
 int clone_check_for_rx() {
 
-    //get current status
-    int sys_stat = radio->dwt_read32bitreg(SYS_STATUS_ID);
-    
-    //got packet
-    if((sys_stat & SYS_STATUS_RXFCG_BIT_MASK) > 0) {
-        return 1;
-    }
-    //got packet (bad checksum, if we got a good checksum, both this bit and the one above is set. Otherwise, only this bit will be set.)
-    else if ((sys_stat & SYS_STATUS_RXFR_BIT_MASK) > 0) {
-        return 2;
-    } 
-    //got error
-    else if ((sys_stat & SYS_STATUS_ALL_RX_ERR) > 0) {
-        return 3;
-    }
-    return 0;
+		//get current status
+		int sys_stat = radio->dwt_read32bitreg(SYS_STATUS_ID);
+		
+		//got packet
+		if((sys_stat & SYS_STATUS_RXFCG_BIT_MASK) > 0) {
+			return 1;
+		}
+		//got packet (bad checksum, if we got a good checksum, both this bit and the one above is set. Otherwise, only this bit will be set.)
+		else if ((sys_stat & SYS_STATUS_RXFR_BIT_MASK) > 0) {
+			return 2;
+		} 
+		//got error
+		else if ((sys_stat & SYS_STATUS_ALL_RX_ERR) > 0) {
+			return 3;
+		}
+        //got timeout
+        else if ((sys_stat & SYS_STATUS_ALL_RX_TO) > 0) {
+            return 4;
+        }
+		return 0;
 
-    //in checking for RX errors, the simple library used:
-    //(1 << 26)     RXSTO yes
-    //(1 << 21)     RXPTO no (preamble detection timeout)
-    //(1 << 18)     CIAERR yes
-    //(1 << 17)     RXFTO no (Receive Frame Wait Timeout)
-    //(1 << 16)     RXFSL yes
-    //(1 << 15)     RXFCE yes     (rxfcg is not included here)
-    //(1 << 12)     RXPHE yes
-    //#define SYS_STATUS_RX_ERR 0x4279000
+		//in checking for RX errors, the simple library used:
+		//(1 << 26)     RXSTO yes
+		//(1 << 21)     RXPTO no (preamble detection timeout)
+		//(1 << 18)     CIAERR yes
+		//(1 << 17)     RXFTO no (Receive Frame Wait Timeout)
+		//(1 << 16)     RXFSL yes
+		//(1 << 15)     RXFCE yes     (rxfcg is not included here)
+		//(1 << 12)     RXPHE yes
+		//#define SYS_STATUS_RX_ERR 0x4279000
 
-    //the rx example for the makerfabs library used:
-    //SYS_STATUS_RXFCG_BIT_MASK no
-    //SYS_STATUS_RXPHE_BIT_MASK yes
-    //SYS_STATUS_RXFCE_BIT_MASK yes
-    //SYS_STATUS_RXFSL_BIT_MASK yes
-    //SYS_STATUS_RXSTO_BIT_MASK yes
-    //SYS_STATUS_ARFE_BIT_MASK no (automatic frame filtering rejection)
-    //SYS_STATUS_CIAERR_BIT_MASK yes
+		//the rx example for the makerfabs library used:
+		//SYS_STATUS_RXFCG_BIT_MASK no
+		//SYS_STATUS_RXPHE_BIT_MASK yes
+		//SYS_STATUS_RXFCE_BIT_MASK yes
+		//SYS_STATUS_RXFSL_BIT_MASK yes
+		//SYS_STATUS_RXSTO_BIT_MASK yes
+		//SYS_STATUS_ARFE_BIT_MASK no (automatic frame filtering rejection)
+		//SYS_STATUS_CIAERR_BIT_MASK yes
 
-}
+	}
 
 //blocks until the radio gets a message in or until timeout_ms is reached.
 //we can also wait for timeout using dwt_setrxtimeout...
@@ -192,6 +196,8 @@ int clone_check_for_rx() {
 int wait_for_message_with_timeout(uint32_t timeout_ms, bool no_timeout = false) {
 
 
+	bool got_response = false;
+	bool error = false;
 	auto tx_time = millis();
 	while(no_timeout || (millis() - tx_time < timeout_ms)) {
 		auto response = radio->check_for_rx();
@@ -207,10 +213,19 @@ int wait_for_message_with_timeout(uint32_t timeout_ms, bool no_timeout = false) 
 }
 
 
-
 //set the radio's output channel
 void set_channel_config(bool is_freq_5) {
+
+    //force into ILDE_RC
     radio->dwt_forcetrxoff();
+
+    //enable pll prebuffer (required for channel 5 to properly lock to the incoming phase)
+    //page 42 of the API guide outlines this method, it says it should be changed in IDLE_RC mode, but putting int below the dwt_configure() calls below didn't seem to hurt anything
+    radio->dwt_setpllrxprebufen(dwt_pll_prebuf_cfg_e::DWT_PLL_RX_PREBUF_ENABLE);
+
+    //force it to log important telemetry
+    radio->dwt_configciadiag(DW_CIA_DIAG_LOG_ALL);
+
     if(is_freq_5) {
         //Serial.print("CHN: 5 ");
         //Serial.print(" ");
@@ -224,8 +239,6 @@ void set_channel_config(bool is_freq_5) {
         while(radio->dwt_configure(&config_ch9) != DWT_SUCCESS);
         radio->dwt_configuretxrf(&txconfig_ch9);
     }
-    //force it to log important telemetry
-    radio->dwt_configciadiag(DW_CIA_DIAG_LOG_ALL);
 }
 
 //set the time at which the next transaction should happen
@@ -240,7 +253,6 @@ uint64_t set_outgoing_time(uint64_t turnaround_time_micros, uint64_t rx_time_rad
     return (tx_timestamp << 8) + TX_ANT_DELAY;
 }
 
-
 //converts an unsigned 24 bit integer into a signed one, mainly used by CIR stuff
 int32_t convert_u24_to_i24(uint32_t raw_24bit) {
     // Mask to ensure we only have 24 bits of data
@@ -254,409 +266,334 @@ int32_t convert_u24_to_i24(uint32_t raw_24bit) {
     return static_cast<int32_t>(raw_24bit);
 }
 
+//prints the CIR packet array to the terminal, format: [phase0],[magnitude0],[phase1],[magnitude1],[phase2]...
+void print_cir_packet(const CirDebugPacket& packet) {
+    for(int i = 0; i < CirDebugPacket::VALUE_COUNT; ++i) {
+        uint32_t real = 0;
+        uint32_t img = 0;
+        packet.get_complex_at(i, &real, &img);
+
+        float real_f = convert_u24_to_i24(real);
+        float img_f = convert_u24_to_i24(img);
+
+        float phase = atan2(img_f, real_f);
+		float amplitude = sqrtf(img_f * img_f + real_f * real_f);
+
+
+        Serial.print(phase);
+        Serial.print(",");
+        Serial.print(amplitude);
+        Serial.print(",");
+    }
+}
 
 ////////////////////main methods
 
+//just blasts packets. How fast can we go?
+bool freq_flipper = false;
+void loop_test() {
 
+    auto tick = micros();
 
-bool flip = false;
-//initiator, does not do the final calculations
-//loop_ds_init
-void loop_ds_tag() {
+    auto outgoing = "Hello";
+    //wrap outgoing_tr_packet in a main packet
+    UWBPacket outgoing_main = UWBPacket(
+        get_uuid(),
+        UWBPacket::BROADCAST_MAC,
+        PacketType::UserDefined,
+        (uint8_t*)outgoing,
+        sizeof(outgoing)
+    );
 
+    auto midpoint = micros();
 
-	//start with clean slate
-	radio->clear_system_status();
-	radio->dwt_writefastCMD(CMD_TXRXOFF);
+    //send message and immediately start waiting for response (non-blocking)
+    send_packet(outgoing_main, DWT_START_TX_IMMEDIATE);
 
-	//make starting packet to send (doesn't have to be a TWR packet to start with)
-	auto payload = RangingPacket(0, 0, RangingFrameNum::Request, 0, 0, 0);
-	UWBPacket packet = UWBPacket(
-		get_uuid(), //this device's mac
-		UWBPacket::BROADCAST_MAC,
-		PacketType::Ranging,
-		payload.get_compiled(),
-		payload.get_compiled_len()
-	);
+    auto first_half = midpoint - tick;
+    auto total = micros() - tick;
+    Serial.print(first_half);
+    Serial.print(" ");
+    Serial.println(total);
 
-	if(!send_packet(packet, DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED)) {
-		//failed to send, restart loop
-		Serial.println("Failed to send initial packet.");
-		delay(1000);
-		return;
-	}
-
-	//wait for RX
-	auto rx_status = wait_for_message_with_timeout(1000);
-	if(rx_status != 1) {
-		Serial.print("RX Error: ");
-		Serial.println(rx_status);
-		return;
-	}
-
-
-	//parse the packet to get the timestamps from the other radio
-	//UWBPacket response_packet = get_packet();
-
-	//timestamp when the initial packet was sent by us
-	uint64_t initial_tx_timestamp = radio->get_tx_timestamp_u64();
-
-	//timestamp when the response was got by us
-	uint64_t rx_timestamp = radio->get_rx_timestamp_u64();
-
-	//full round trip 
-	uint64_t round_1_time = rx_timestamp - initial_tx_timestamp;
-
-	//read CIR
-	uint32_t cir_real = 0;
-	uint32_t cir_img = 0;
-	{
-		dwt_rxdiag_t diagnostics = {};
-        radio->dwt_readdiagnostics(&diagnostics);
-
-		uint16_t fp_index = diagnostics.ipatovFpIndex >> 6; //bit shifting removes the fractional part
-
-		uint8_t complex_byte_len = 6;
-		//extra 1 for the dummy leading byte we get when starting the read
-		uint8_t cir_buffer[complex_byte_len * CIR_LEN + 1] = {};
-		radio->dwt_readaccdata(cir_buffer, (complex_byte_len * CIR_LEN + 1), fp_index);
-
-		//the original code took the second entry of three in the CIR buffer
-		cir_real = 
-			  cir_buffer[1 + 1*complex_byte_len] //lo
-			| cir_buffer[1 + 1*complex_byte_len + 1] << 8 //mid
-			| cir_buffer[1 + 1*complex_byte_len + 2] << 16; //hi
-		cir_img = 
-			  cir_buffer[1 + 1*complex_byte_len + 3] //lo
-			| cir_buffer[1 + 1*complex_byte_len + 4] << 8 //mid
-			| cir_buffer[1 + 1*complex_byte_len + 5] << 16; //hi
-
-	}
-	
-
-	//calculate and populate outgoing time (see above for a breakdown)
-	uint32_t turnaround_time_us = 2000;
-	uint64_t tx_timestamp = set_outgoing_time(turnaround_time_us, rx_timestamp);
-	uint64_t reply_2_time = tx_timestamp - rx_timestamp;
-
-	//write packet
-	RangingPacket range_p = RangingPacket(reply_2_time, round_1_time, RangingFrameNum::Final, 0, cir_real, cir_img);
-	UWBPacket outgoing = UWBPacket(get_uuid(), UWBPacket::BROADCAST_MAC, PacketType::Ranging, range_p.get_compiled(), range_p.get_compiled_len());
-
-	//send with delay
-	if (!send_packet(outgoing, DWT_START_TX_DELAYED)) {
-		Serial.println("Send result not successful");
-		return;
-	}
-
-
-
-	//if we set turnaround_time_us to 2 ms, then this will only work down to 2 ms, if we set it to 1 ms, then this will work spotty down to 1 ms...
-	//why?
-	delay(3);
-	//radio->dwt_writefastCMD(CMD_TXRXOFF);
-	radio->clear_system_status();
-
-	//send the second post-final packet (content doesn't really matter, the anchor needs another point to extract CFO from)
-	uint64_t post_final_tx_time = set_outgoing_time(4000, tx_timestamp);
-	uint64_t reply_3_time = post_final_tx_time - tx_timestamp;
-	RangingPacket range_pfinal = RangingPacket(reply_3_time, 0, RangingFrameNum::PostFinal, 0, 0, 0);
-	outgoing = UWBPacket(get_uuid(), UWBPacket::BROADCAST_MAC, PacketType::Ranging, range_pfinal.get_compiled(), range_pfinal.get_compiled_len());
-
-
-	//send with delay
-	if (!send_packet(outgoing, DWT_START_TX_DELAYED)) {
-		Serial.println("Send result not successful");
-		return;
-	}
-
-
-	Serial.println("Sent ranging response");
-
-
-	//debug: flip LED
-	flip = !flip;
-	radio->gpio_set(2, flip);
-	radio->gpio_set(3, !flip);
-
-	delay(10);
-
-
+    set_channel_config(freq_flipper);
+    freq_flipper = !freq_flipper;
+    //delay(1000);
 
 
 }
 
-//responder, makes the final calculations
-//loop_ds_resp
-void loop_ds_anchor() {
-
-
-	//clean slate
-	radio->clear_system_status();
-	radio->dwt_writefastCMD(CMD_TXRXOFF);
-
-	//start listening
-	radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
-
-	//wait for initial message
-	int result = wait_for_message_with_timeout(0, true);
-
-	//failed to properly get packet
-	if(result != 1) {
-		Serial.print("Error getting packet: ");
-		Serial.println(result);
-		return;
-	}
-
-
-	//we don't need to parse the packet, but if we did, that happens here.
-	// {
-	// 	auto pt = get_packet();
-	// 	if(pt.get_packet_type() == PacketType::Ranging) {
-	// 		auto rr = RangingPacket(pt.get_compiled());
-	// 		if(rr.get_frame_no() == RangingFrameNum::Request) {
-	// 			Serial.println("Got Initiator");
-	// 		} else {
-	// 			Serial.println(rr.get_frame_no());
-	// 		}
-	// 	}
-	// }
-
-	//read CIR
-	uint32_t cir_real = 0;
-	uint32_t cir_img = 0;
-	{
-		dwt_rxdiag_t diagnostics = {};
-        radio->dwt_readdiagnostics(&diagnostics);
-
-		uint16_t fp_index = diagnostics.ipatovFpIndex >> 6; //bit shifting removes the fractional part
-
-		uint8_t complex_byte_len = 6;
-		//extra 1 for the dummy leading byte we get when starting the read
-		uint8_t cir_buffer[complex_byte_len * CIR_LEN + 1] = {};
-		radio->dwt_readaccdata(cir_buffer, (complex_byte_len * CIR_LEN + 1), fp_index);
-
-		//the original code took the second entry of three in the CIR buffer
-		cir_real =
-			  cir_buffer[1 + 1*complex_byte_len] //lo
-			| cir_buffer[1 + 1*complex_byte_len + 1] << 8 //mid
-			| cir_buffer[1 + 1*complex_byte_len + 2] << 16; //hi
-		cir_img =
-			  cir_buffer[1 + 1*complex_byte_len + 3] //lo
-			| cir_buffer[1 + 1*complex_byte_len + 4] << 8 //mid
-			| cir_buffer[1 + 1*complex_byte_len + 5] << 16; //hi
-
-
-
-
-
-		//TEST: dump a sizeable portion of the CIR buffer to the serial terminal
-		if(0) {
-			//tests
-			const size_t debug_sample_size = 42;
-			float magnitude_bulk[debug_sample_size] = {};
-			float phase_bulk[debug_sample_size] = {};
-			uint8_t cir_buffer_bulk[complex_byte_len * debug_sample_size + 1] = {};
-			radio->dwt_readaccdata(cir_buffer_bulk, (complex_byte_len * debug_sample_size + 1), fp_index - (debug_sample_size / 2));
-
-			//convert those into complex numbers
-			for(size_t i = 0; i < debug_sample_size; ++i) {
-				uint32_t cir_real_2 =
-					cir_buffer_bulk[1 + i*complex_byte_len] //lo
-					| cir_buffer_bulk[1 + i*complex_byte_len + 1] << 8 //mid
-					| cir_buffer_bulk[1 + i*complex_byte_len + 2] << 16; //hi
-				uint32_t cir_img_2 =
-					cir_buffer_bulk[1 + i*complex_byte_len + 3] //lo
-					| cir_buffer_bulk[1 + i*complex_byte_len + 4] << 8 //mid
-					| cir_buffer_bulk[1 + i*complex_byte_len + 5] << 16; //hi
-
-				float ciri2 = (float)convert_u24_to_i24(cir_img_2);
-				float cirr2 = (float)convert_u24_to_i24(cir_real_2);
-
-				float phase = atan2(ciri2, cirr2);
-
-				float amplitude = sqrtf(ciri2 * ciri2 + cirr2 * cirr2);
-
-				magnitude_bulk[i] = amplitude;
-				phase_bulk[i] = phase;
-
-			}
-			for(size_t i = 0; i < debug_sample_size; ++i) {
-				Serial.print(magnitude_bulk[i]);
-				Serial.print(",");
-			}
-			Serial.println("");
-			for(size_t i = 0; i < debug_sample_size; ++i) {
-				Serial.print(phase_bulk[i]);
-				Serial.print(",");
-			}
-			Serial.println("");
-			Serial.println(fp_index);
-
-			return;
-
-		}
-
-	}
-	
-
-
-	//the time we got the packet
-	auto rx_timestamp = radio->get_rx_timestamp_u64();
-	//calculate and populate outgoing time (see above for a breakdown)
-	uint32_t turnaround_time_us = 3000;
-	uint64_t tx_timestamp = set_outgoing_time(turnaround_time_us, rx_timestamp);
-	uint64_t reply_1_time = tx_timestamp - rx_timestamp;
-
-
-	//write packet (content does not matter; the other radio will keep track of its own times)
-	auto payload = RangingPacket(0,0,RangingFrameNum::Response, 0, 0, 0);
-	UWBPacket packet = UWBPacket(
-		get_uuid(), //this device's mac
-		UWBPacket::BROADCAST_MAC,
-		PacketType::Ok,
-		payload.get_compiled(),
-		payload.get_compiled_len()
-	);
 
-	//send packet
-	if(!send_packet(packet, DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED)) {
-		Serial.println("Send result not successful");
-		return;
-	}
 
-	//Serial.println("Got initial packet and sent response.");
-	radio->clear_system_status();
+bool is_freq_5 = true;
 
+//tag
+void loop_initiator() {
+    //start with clean slate
+    radio->clear_system_status();
+    radio->dwt_forcetrxoff();
 
-	//wait for RX
-	auto rx_status = wait_for_message_with_timeout(1000);
-	if(rx_status != 1) {
-		Serial.print("RX Error: ");
-		Serial.println(rx_status);
-		return;
-	}
+    //ensure frequency is set correctly
+    set_channel_config(is_freq_5);
 
+    //1000 microseconds * 1000, should be 1 second
+    radio->dwt_setrxtimeout(UUS_TO_DWT_TIME * 1000000u);
 
-	//parse the packet to get the timestamps from the other radio
-	UWBPacket response_packet = get_packet();
+    digitalWrite(LED_D9, false); //LED on 
 
-	uint32_t cir_remote_real = 0;
-	uint32_t cir_remote_img = 0;
-	double distance = 0.0;
-	switch(response_packet.get_packet_type()) {
-		case PacketType::Ranging: {
-			uint64_t round_2_time = radio->get_rx_timestamp_u64() - tx_timestamp;
+    //kick off poll
+    auto poll_ranging = RangingPacket(0, 0, RangingFrameNum::Request);
+    UWBPacket poll_packet = UWBPacket(
+        get_uuid(),
+        UWBPacket::BROADCAST_MAC,
+        PacketType::Ranging,
+        poll_ranging.get_compiled(),
+        poll_ranging.get_compiled_len()
+    );
+    send_packet(poll_packet, DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
 
-			auto ranging_data = RangingPacket(response_packet.get_payload());
 
-			uint64_t round_1_time = ranging_data.get_round_time();
-			uint64_t reply_2_time = ranging_data.get_reply_time();
+    //wait for response
+    auto response = 0;
+    do {
+        response = clone_check_for_rx();
+    } while(response == 0);
 
-			//see page 249
-			double top_val = ((double)round_1_time * (double)round_2_time) - ((double)reply_1_time * (double)reply_2_time);
-			double bottom_val = ((double)round_1_time + (double)round_2_time + (double)reply_1_time + (double)reply_2_time);
+    if(response == 1) {
 
-			double time_of_flight = ((double)top_val)/((double)bottom_val);
-			distance = time_of_flight * SPEED_OF_LIGHT * DWT_TIME_UNITS;
+        radio->clear_system_status();
+        
+        //Serial.println("Success");
+        //dwt_rxdiag_t diagnostics = {};
+        //radio->dwt_readdiagnostics(&diagnostics);
+        //uint16_t fp_index = diagnostics.ipatovFpIndex >> 6;
+        //test: compare these values
+        //dwt_rxdiag_t diagnostics = {};
+        //radio->dwt_readdiagnostics(&diagnostics);
+        //uint16_t ip_poa = diagnostics.ipatovPOA;
 
-			cir_remote_real = ranging_data.get_cir_real();
-			cir_remote_img = ranging_data.get_cir_imaginary();
+        //read phase of arrival and convert to signed
+        uint16_t ip_poa = radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1);
+        //int16_t ip_poa_signed = (int16_t)((ip_poa & 0x3FFF)|((ip_poa & 0x2000)?0xC000:0x0000));
+        //float ip_poa_radians = (float)ip_poa_signed / (float)(1<<11); //we'll do this in python
 
-			// Serial.print("Rounds: ");
-			// print_u64(round_1_time);
-			// Serial.print(" ");
-			// print_u64(round_2_time);
-			// Serial.print(" Replies: ");
-			// print_u64(reply_1_time);
-			// Serial.print(" ");
-			// print_u64(reply_2_time);
-			// Serial.print(" ");
 
-			//Serial.print("Distance: ");
-			//Serial.println(distance);
+        //read in the cir data
+        uint16_t fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
+        CirDebugPacket final_cirdebug = CirDebugPacket();
+        final_cirdebug.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
 
-			break;
-		}
-		default: {
-			Serial.print("Wrong RX Packet type. Expected Ranging packet ");
-			Serial.println(response_packet.get_packet_type());
+        final_cirdebug.set_poa(ip_poa);
+        final_cirdebug.set_acc_offset(fp_index);
+        final_cirdebug.set_carrier_integrator(radio->dwt_readcarrierintegrator());
 
-			if(response_packet.get_packet_type() == 0) {
-				//debug: flip LED
-				flip = !flip;
-				radio->gpio_set(2, flip);
-				radio->gpio_set(3, !flip);
-			}
+        auto final_packet = UWBPacket(
+            get_uuid(),
+            UWBPacket::BROADCAST_MAC,
+            PacketType::Ranging,
+            final_cirdebug.get_compiled(),
+            final_cirdebug.get_compiled_len()
+        );
 
-			return;
-		}
-	}
+        //send final packet
+        set_outgoing_time(TURNAROUND_TIME_US, radio->get_rx_timestamp_u64());
 
+        //send final
+        if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
 
-	// //get ready for another one
-	radio->clear_system_status();
-	radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
+            radio->clear_system_status();
+            set_outgoing_time(TURNAROUND_TIME_US, radio->get_tx_timestamp_u64());
 
+            //send post-final
+            if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
+                radio->clear_system_status();
+                digitalWrite(LED_D9, false);
+            } else {
+                Serial.println("Send Post-Final Error");
+            }
 
-	// //wait for post-final RX message
-	rx_status = wait_for_message_with_timeout(500);
-	if(rx_status != 1) {
-		Serial.print("RX Error: ");
-		Serial.println(rx_status);
-		return;
-	}
 
-	//print the distance we calculated if we got this last packet (as a sort-of sanity check to make sure we get the last packet correctly)
-	response_packet = get_packet();
-	if(response_packet.get_packet_type() == PacketType::Ranging) {
-		auto rs_packet = RangingPacket(response_packet.get_payload());
+        } else {
+            Serial.println("Send Final Error");
+        }
 
-		if(rs_packet.get_frame_no() == RangingFrameNum::PostFinal) {
+    }
 
-			//Serial.println(distance);
+    digitalWrite(LED_D9, true); //LED off
+    delay(50);
 
+}
 
-			float tpi = 3.14159265358979f;
 
-			float cir_realf = (float)convert_u24_to_i24(cir_real);
-			float cir_imgf = (float)convert_u24_to_i24(cir_img);
+//base
+void loop_responder() {
 
-			float cir_remote_realf = (float)convert_u24_to_i24(cir_remote_real);
-			float cir_remote_imgf = (float)convert_u24_to_i24(cir_remote_img);
 
-			float remote_phase = atan2f(cir_remote_imgf, cir_remote_realf);
-			float remote_amplitude = sqrtf(cir_remote_imgf * cir_remote_imgf + cir_remote_realf * cir_remote_realf);
+    //start with clean slate
+    radio->clear_system_status();
 
-			float phase = atan2(cir_imgf, cir_realf);
-			float amplitude = sqrtf(cir_imgf * cir_imgf + cir_realf * cir_realf);
+    //ensure frequency is set to 5
+    set_channel_config(is_freq_5);
 
-			float recovered_phase = remote_phase + phase;
-			// float recovered_phase = std::fmod(remote_phase + phase, tpi);
-			// if(recovered_phase < 0.) {
-			// 	recovered_phase += tpi;
-			// }
+    //1000 microseconds * 1000, should be 1 second
+    radio->dwt_setrxtimeout(UUS_TO_DWT_TIME * 1000000u);
 
-			Serial.print(remote_phase),
-			Serial.print(",");
-			Serial.print(phase);
-			Serial.print(",");
-			Serial.println(recovered_phase);
 
+    radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
 
+    //wait for response
+    auto poll_status = 0;
+    do {
+        poll_status = clone_check_for_rx();
+    } while(poll_status == 0);
 
-		}
-	}
+    if(poll_status == 1) {
+        
+        digitalWrite(LED_D9, false); //LED on 
 
+        auto poll_rx_timestamp = radio->get_rx_timestamp_u64();
+        auto poll_packet = get_packet();
+        auto poll_cirdebug = CirDebugPacket(poll_packet.get_payload());
 
-	//Serial.println(distance);
+
+        radio->clear_system_status();
+
+        //todo: I'd rather read this direct
+        //dwt_rxdiag_t diagnostics = {};
+        //radio->dwt_readdiagnostics(&diagnostics);
+
+        //1:1 with the DW1000 version
+        //raw register: IP_DIAG_8.IP_FP
+        //uint16_t fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
+
+
+        //populate outgoing packet with data (not really needed; the other radio doesn't read this)
+        uint16_t fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
+        CirDebugPacket poll_gleaned_info = CirDebugPacket();
+        poll_gleaned_info.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
+        poll_gleaned_info.set_carrier_integrator(radio->dwt_readcarrierintegrator()); //store carrier integrator for reverse compensation later
+        poll_gleaned_info.set_poa(radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1)); //store the phase of arrival too
+
+
+        UWBPacket response_packet = UWBPacket(
+            get_uuid(),
+            UWBPacket::BROADCAST_MAC,
+            PacketType::Ranging,
+            poll_gleaned_info.get_compiled(),
+            poll_gleaned_info.get_compiled_len()
+        );
+
+        set_outgoing_time(TURNAROUND_TIME_US, radio->get_rx_timestamp_u64());
+
+
+        if(send_packet(response_packet, DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED)) {
+
+            radio->clear_system_status();
+
+            auto final_status = 0;
+            do {
+                final_status = clone_check_for_rx();
+            } while(final_status == 0);
+
+            if(final_status == 1) {
+                
+                //save the response CIR data
+                auto final_rx_timestamp = radio->get_rx_timestamp_u64();
+                auto final_packet = get_packet();
+                auto response_gleaned_info = CirDebugPacket(final_packet.get_payload());
+
+                //save the final CIR data
+                CirDebugPacket final_gleaned_info = CirDebugPacket();
+                fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
+                final_gleaned_info.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
+                final_gleaned_info.set_carrier_integrator(radio->dwt_readcarrierintegrator()); //store carrier integrator for reverse compensation later
+                final_gleaned_info.set_poa(radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1)); //store the phase of arrival too
+                
+
+                radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
+                auto post_final_status = 0;
+                do {
+                    post_final_status = clone_check_for_rx();
+                } while(post_final_status == 0);
+
+                if(post_final_status == 1) {
+                    digitalWrite(LED_D9, true); //LED off 
+
+                    auto post_final_rx_timestamp = radio->get_rx_timestamp_u64();
+                    auto post_final_packet = get_packet();
+
+                    //save the post final CIR data
+                    CirDebugPacket post_final_cirdebug = CirDebugPacket();
+                    fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
+                    post_final_cirdebug.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
+                    post_final_cirdebug.set_carrier_integrator(radio->dwt_readcarrierintegrator()); //store carrier integrator for reverse compensation later
+                    post_final_cirdebug.set_poa(radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1)); //store the phase of arrival too
+                    
+
+                    Serial.println("A");
+                    print_cir_packet(poll_gleaned_info);
+                    Serial.println();
+                    print_cir_packet(response_gleaned_info);
+                    Serial.println();
+                    print_cir_packet(final_gleaned_info);
+                    Serial.println();
+                    print_cir_packet(post_final_cirdebug);
+
+
+                    // Serial.println();
+                    // Serial.print(carrier_integrator_0);
+                    // Serial.print(",");
+                    // Serial.print(carrier_integrator_tag);
+                    // Serial.print(",");
+
+                    // Serial.print(carrier_integrator_1);
+                    // Serial.print(",");
+                    // Serial.print(fp_index_tag);
+                    // Serial.print(",");
+
+                    // Serial.print(fp_index_0);
+                    // Serial.print(",");
+                    // Serial.print(fp_index_1);
+                    // Serial.print(",");
+
+                    // Serial.print(ip_poa_signed);
+                    // Serial.print(",");
+                    // Serial.print(ip_poa_tag);
+
+
+                    Serial.println();
+                    Serial.println("B");
+
+
+
+
+                } else {
+                    Serial.print("RX Error: ");
+                    Serial.println(post_final_status);
+                }
+
+
+            } else {
+                Serial.print("RX Error: ");
+                Serial.println(final_status);
+            }
+
+
+        } else {
+            Serial.print("TX Error");
+        }
+
+
+
+    } else {
+        Serial.print("RX error: ");
+        Serial.println(poll_status);
+    }
 
 
 }
 
 
-
-// -2*pi*freq*time_line_of_sight - 2*pi*carrier_freq_offset*tttt+(initial_offset)
 
 
 //starts SPI, Serial, and the DW3000
@@ -672,6 +609,10 @@ void setup() {
 	// sets up the SPI connection to the DW3000 radio
 	SPI = SPIClass(NRF_SPI2, SPI_MISO, SPI_CLK, SPI_MOSI);
 	SPI.begin();
+
+
+    pinMode(LED_D9, OUTPUT);
+    digitalWrite(LED_D9, true); //turn LED off
 
     //set up the backend components and feed them into the main DW3000 class
 	//uart = new DWUart(BAUD_RATE);
@@ -702,10 +643,10 @@ void setup() {
 	}
 
 	//enabling LEDs 2 and 3 (visible on the eval board) to blink on RX and TX
-  	//radio->dwt_setleds(DWT_LEDS_ENABLE | DWT_LEDS_INIT_BLINK);
+  	radio->dwt_setleds(DWT_LEDS_ENABLE | DWT_LEDS_INIT_BLINK);
 
     //manual LED control
-	radio->gpio_init_output();
+	//radio->gpio_init_output();
 
     //happens in the loop, don't need to do it here
     //set up general radio configuration
@@ -717,27 +658,24 @@ void setup() {
     // //set up radio transmission configuration
     // radio->dwt_configuretxrf(&txconfig_ch5);
 
-	set_channel_config(true);
-
     radio->dwt_setrxantennadelay(RX_ANT_DELAY);
 	radio->dwt_settxantennadelay(TX_ANT_DELAY);
 
-    //in my other code, I put sleep settings here. I don't really need that for this example, so I exclude it.
-
-    //we should also probably set the pan_id here, but I'll skip that for now.
-    //radio->dwt_setpanid(1);
-    
     Serial.println("Ready");
 }
 
 
 void loop() {
 
+    
+    //loop_test();
+    //return;
+
 
 #ifdef TAG
-    loop_ds_tag();
+    loop_initiator();
 #else
-    loop_ds_anchor();
+    loop_responder();
 #endif
 
 }
