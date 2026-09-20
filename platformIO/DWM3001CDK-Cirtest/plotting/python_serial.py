@@ -42,12 +42,12 @@ phase_tag_array: list[float] = []
 
 #pre-set limits if you know them, or auto-scale later
 #magnitude_graph.set_xlim(0, 20)
-magnitude_graph.set_ylim(0, 3500)
+#magnitude_graph.set_ylim(0, 3500)
 #phase_graph.set_xlim(0, 20)
-phase_graph.set_ylim(0, 8)
+phase_graph.set_ylim(0, 6.3)
 
-
-if False:
+display_phase_graph = False
+if display_phase_graph:
     canceled_graph.set_ylim(-2, 2)
     canceled_graph.set_xlim(-2, 2)
 else:
@@ -94,7 +94,7 @@ def update_plot_data(
     #canceled_phase3_ln.set_ydata(phase_tag_array)
 
     #test: circle
-    if False:
+    if display_phase_graph:
         x_val = math.cos(canceled_y)
         y_val = math.sin(canceled_y)
 
@@ -207,6 +207,28 @@ def parse_cir_line(data: str) -> tuple[list[float], list[float]]:
 def wrap_to_pi(phase_angle: float) -> float:
     return (phase_angle + math.pi) % (2 * math.pi) - math.pi
     ...
+
+moving_average_window_size = 2
+moving_average_array: list[float] = []
+def moving_average(new_entry: float) -> float:
+
+    moving_average_array.append(new_entry)
+    if(len(moving_average_array) > moving_average_window_size):
+        moving_average_array.pop(0)
+        ...
+
+    average = 0    
+    for i in moving_average_array:
+        average += i
+        ...
+
+    average /= len(moving_average_array)
+    return average
+
+    ...
+
+
+
 #####################################SERIAL STUFF
 
 
@@ -272,59 +294,54 @@ try:
 
                         parts = re.split(r'\n', ascii_string)
 
-                        anchor_cir = parse_cir_line(parts[1])
-                        tag_cir = parse_cir_line(parts[2])
-                        post_final_cir = parse_cir_line(parts[3])
+                        poll_cir = parse_cir_line(parts[1])
+                        response_cir = parse_cir_line(parts[2])
+                        final_cir = parse_cir_line(parts[3])
+                        post_final_cir = parse_cir_line(parts[4])
 
-                        #this method is not supposed to handle this, but we're doing it anyways
-                        carrier_integrators = parse_cir_line(parts[4])
-
-                        #constants pulled from the qorvo API
-                        FREQ_OFFSET_MULTIPLIER = (998.4e6 / 2.0 / 1024.0 / 131072.0)
-                        HERTZ_TO_PPM_MULTIPLIER_CHAN_5 = (-1.0e6 / 6489.6e6)
-
-                        #read in carrier integrators and first path index values
-                        anchor_ci = carrier_integrators[0][0]
-                        tag_ci = carrier_integrators[1][0]
-                        anchor2_ci = carrier_integrators[0][1]
-                        #fp_index - 8 is where we start reading our samples
-                        tag_fp_index = carrier_integrators[1][1] - 8
-                        anchor_fp_index = carrier_integrators[0][2] - 8
-                        anchor2_fp_index = carrier_integrators[1][2] - 8
-
-                        #phase of arrival
-                        ip_poa_anchor = float(carrier_integrators[0][3]) / float(1 << 11)
-                        ip_poa_tag = float(carrier_integrators[1][3]) / float(1 << 11)
-
-
-                        #calculate rotations per sample for de-rotating them.
-                        #frequency = 6489.6e6
-                        tag_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * tag_ci
-                        anchor_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * anchor_ci
-                        anchor2_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * anchor2_ci
-
-                        #offset_ratio = tag_second_ci * FREQ_OFFSET_MULTIPLIER * HERTZ_TO_PPM_MULTIPLIER_CHAN_5# / 1e6
-                        tag_rotation_per_sample = 2 * math.pi * tag_freq_offset_hz * (1. / 499.22e6)
-                        anchor_rotation_per_sample = 2 * math.pi * anchor_freq_offset_hz * (1. / 499.22e6)
-                        anchor2_rotation_per_sample = 2 * math.pi * anchor2_freq_offset_hz * (1. / 499.22e6)
+                        # #this method is not supposed to handle this, but we're doing it anyways
+                        # carrier_integrators = parse_cir_line(parts[4])
+                        # #constants pulled from the qorvo API
+                        # FREQ_OFFSET_MULTIPLIER = (998.4e6 / 2.0 / 1024.0 / 131072.0)
+                        # HERTZ_TO_PPM_MULTIPLIER_CHAN_5 = (-1.0e6 / 6489.6e6)
+                        # #read in carrier integrators and first path index values
+                        # anchor_ci = carrier_integrators[0][0]
+                        # tag_ci = carrier_integrators[1][0]
+                        # anchor2_ci = carrier_integrators[0][1]
+                        # #fp_index - 8 is where we start reading our samples
+                        # tag_fp_index = carrier_integrators[1][1] - 8
+                        # anchor_fp_index = carrier_integrators[0][2] - 8
+                        # anchor2_fp_index = carrier_integrators[1][2] - 8
+                        # #phase of arrival
+                        # ip_poa_anchor = float(carrier_integrators[0][3]) / float(1 << 11)
+                        # ip_poa_tag = float(carrier_integrators[1][3]) / float(1 << 11)
+                        # #calculate rotations per sample for de-rotating them.
+                        # #frequency = 6489.6e6
+                        # tag_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * tag_ci
+                        # anchor_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * anchor_ci
+                        # anchor2_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * anchor2_ci
+                        # #offset_ratio = tag_second_ci * FREQ_OFFSET_MULTIPLIER * HERTZ_TO_PPM_MULTIPLIER_CHAN_5# / 1e6
+                        # tag_rotation_per_sample = 2 * math.pi * tag_freq_offset_hz * (1. / 499.22e6)
+                        # anchor_rotation_per_sample = 2 * math.pi * anchor_freq_offset_hz * (1. / 499.22e6)
+                        # anchor2_rotation_per_sample = 2 * math.pi * anchor2_freq_offset_hz * (1. / 499.22e6)
 
 
                         #phase wrap and de-rotate
-                        for i in range(len(anchor_cir[0])):
+                        for i in range(len(poll_cir[0])):
 
                             #anchor_cir[0][i] = anchor_cir[0][i] - ip_poa_anchor 
                             #tag_cir[0][i] = tag_cir[0][i] - ip_poa_tag
-
-                            anchor_cir[0][i] = anchor_cir[0][i] - (anchor_fp_index + i) * anchor_rotation_per_sample
-                            tag_cir[0][i] = tag_cir[0][i] - (tag_fp_index + i) * tag_rotation_per_sample
-
+                            #anchor_cir[0][i] = anchor_cir[0][i] - (anchor_fp_index + i) * anchor_rotation_per_sample
+                            #tag_cir[0][i] = tag_cir[0][i] - (tag_fp_index + i) * tag_rotation_per_sample
                             #post_final_cir[0][i] = post_final_cir[0][i] - (anchor2_fp_index + i) * anchor2_rotation_per_sample
 
 
-                            if(anchor_cir[0][i] < 0):
-                                anchor_cir[0][i] += 2 * math.pi
-                            if(tag_cir[0][i] < 0):
-                                tag_cir[0][i] += 2 * math.pi
+                            if(poll_cir[0][i] < 0):
+                                poll_cir[0][i] += 2 * math.pi
+                            if(response_cir[0][i] < 0):
+                                response_cir[0][i] += 2 * math.pi
+                            if(final_cir[0][i] < 0):
+                                final_cir[0][i] += 2 * math.pi
                             if(post_final_cir[0][i] < 0):
                                 post_final_cir[0][i] += 2 * math.pi
 
@@ -335,29 +352,37 @@ try:
 
                         #I think I can use collect to make this go faster... oh, well.
                         x_vals: list[float] = []
-                        for i in range(len(anchor_cir[0])):
+                        for i in range(len(poll_cir[0])):
                             x_vals.append(float(i))
 
-                        cancled_cir = anchor_cir[0][9] + tag_cir[0][9]# - post_final_cir[0][9]
-                        cancled_cir = cancled_cir % (2 * math.pi)
+                        cancled_cir = poll_cir[0][8] + response_cir[0][8] - (final_cir[0][8] - post_final_cir[0][8])
 
-                        inverted_cir = (cancled_cir + math.pi) % (2 * math.pi)
-
-                        delta_cir = cancled_cir - last_canceled_cir
-
-                        orig_cir = cancled_cir
-
-
+                        #cancled_cir = cancled_cir % (2 * math.pi)
+                        #inverted_cir = (cancled_cir + math.pi) % (2 * math.pi)
+                        #delta_cir = cancled_cir - last_canceled_cir
+                        #orig_cir = cancled_cir
                         #if(abs(last_canceled_cir - inverted_cir) < abs(last_canceled_cir - cancled_cir)):
                         #    cancled_cir = inverted_cir
-                        #    print(f"Should invert {inverted_cir}")
-                        
-                        last_canceled_cir = orig_cir
+                        #    print(f"Should invert {inverted_cir}")                        
+                        #last_canceled_cir = orig_cir
 
 
 
                         #cancled_cir2 = anchor_cir[0][9] - tag_cir[0][9] + post_final_cir[0][9]
                         #cancled_cir2 = cancled_cir2 % (2 * math.pi)
+
+                        #the version in the paper varies by about 0.6 radians
+
+                        cancled_cir = cancled_cir % (2 * math.pi)
+                        #cancled_cir = moving_average(cancled_cir)
+
+                        #last_inverted_cir = (last_canceled_cir + math.pi) % (2 * math.pi)
+                        #last_canceled_cir = cancled_cir
+
+                        #submitted_cir = cancled_cir
+                        #if(abs(cancled_cir - last_inverted_cir) < 0.6):
+                        #    submitted_cir = (cancled_cir + math.pi) % (2 * math.pi)
+                        
 
 
 
@@ -368,15 +393,17 @@ try:
                         #    cancled_cir += math.pi
                         #    cancled_cir = cancled_cir % (2 * math.pi)
 
+
+
                         
 
-                        update_plot_data(x_vals, anchor_cir[1], #anchor mag
-                                        x_vals, tag_cir[1], #tag mag
-                                        x_vals, anchor_cir[0], #anchor phase
-                                        x_vals, tag_cir[0], #tag phase
-                                        cancled_cir, inverted_cir, tag_cir[0][9]
+                        update_plot_data(x_vals, poll_cir[1], #anchor mag
+                                        x_vals, response_cir[1], #tag mag
+                                        x_vals, poll_cir[0], #anchor phase
+                                        x_vals, response_cir[0], #tag phase
+                                        cancled_cir, response_cir[0][9], response_cir[0][9]
                                         )
-
+                        
 
 
 

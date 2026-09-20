@@ -23,7 +23,7 @@
 
 //the time in microseconds to process an incoming packet and send it back out
 //this value varies between MCUs, so it must be found for each new one (SPI speeds eat most of this. I'm currently limited to 8Mhz with the NRF52833)
-#define TURNAROUND_TIME_US 4000
+#define TURNAROUND_TIME_US 8000
 //ditto, but add to that the time it takes the radio to chang efrequencies
 #define TURNAROUND_HOP_TIME_US 4000
 
