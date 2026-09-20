@@ -4,7 +4,7 @@
 ///////////////////code-specific defines
 
 //true if the device is a tag
-#define TAG
+//#define TAG
 
 //needs to be changed for each anchor to do proper scheduling
 #define ANCHOR_ID 1

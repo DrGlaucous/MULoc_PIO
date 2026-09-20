@@ -229,6 +229,8 @@ void set_channel_config(bool is_freq_5) {
         while(radio->dwt_configure(&config_ch9) != DWT_SUCCESS);
         radio->dwt_configuretxrf(&txconfig_ch9);
     }
+    //enable pll prebuffer
+    radio->dwt_setpllrxprebufen(dwt_pll_prebuf_cfg_e::DWT_PLL_RX_PREBUF_ENABLE);
     //force it to log important telemetry
     radio->dwt_configciadiag(DW_CIA_DIAG_LOG_ALL);
 }

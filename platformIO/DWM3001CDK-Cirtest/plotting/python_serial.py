@@ -42,7 +42,7 @@ phase_tag_array: list[float] = []
 
 #pre-set limits if you know them, or auto-scale later
 #magnitude_graph.set_xlim(0, 20)
-#magnitude_graph.set_ylim(0, 3500)
+magnitude_graph.set_ylim(0, 3500)
 #phase_graph.set_xlim(0, 20)
 phase_graph.set_ylim(0, 6.3)
 
@@ -355,7 +355,7 @@ try:
                         for i in range(len(poll_cir[0])):
                             x_vals.append(float(i))
 
-                        cancled_cir = poll_cir[0][8] + response_cir[0][8] - (final_cir[0][8] - post_final_cir[0][8])
+                        cancled_cir = poll_cir[0][9] + response_cir[0][9] - (final_cir[0][9] - post_final_cir[0][9])
 
                         #cancled_cir = cancled_cir % (2 * math.pi)
                         #inverted_cir = (cancled_cir + math.pi) % (2 * math.pi)
