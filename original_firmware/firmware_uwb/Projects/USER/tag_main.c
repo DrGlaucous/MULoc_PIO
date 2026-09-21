@@ -250,7 +250,7 @@ int dw_main(void)
 				//unused
 				int xx = 0;
 
-				//anchor... uh.... label your acronyms, dude.
+				//anchor overhearing estimates
 
 				// AO estimates acquired from anchor i
 				for (uint8_t i = 0; i < ANCHOR_NUM; i++)
@@ -291,6 +291,8 @@ int dw_main(void)
 					n += 1;
 				}
 
+				//tag overhearing estimates
+				
 				// Then TO estimates (from us, the tag)
 				//tag data, gleaned from reading the incoming radio values above, one for each anchor
 				for (uint8_t i = 0; i < ANCHOR_NUM; i++)

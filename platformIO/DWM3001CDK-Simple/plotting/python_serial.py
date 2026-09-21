@@ -76,7 +76,7 @@ def update_plot_data(
     phase_anchor_array.append(canceled_y2)
     phase_tag_array.append(canceled_y3)
 
-    if(len(canceled_y_array) > 150):
+    if(len(canceled_y_array) > 200):
         canceled_y_array.pop(0)
         phase_anchor_array.pop(0)
         phase_tag_array.pop(0)
@@ -88,8 +88,8 @@ def update_plot_data(
     canceled_phase_ln.set_xdata(canceled_x_vals)
     canceled_phase_ln.set_ydata(canceled_y_array)
 
-    #canceled_phase2_ln.set_xdata(canceled_x_vals)
-    #canceled_phase2_ln.set_ydata(phase_anchor_array)
+    canceled_phase2_ln.set_xdata(canceled_x_vals)
+    canceled_phase2_ln.set_ydata(phase_anchor_array)
     #canceled_phase3_ln.set_xdata(canceled_x_vals)
     #canceled_phase3_ln.set_ydata(phase_tag_array)
 
@@ -208,7 +208,7 @@ def wrap_to_pi(phase_angle: float) -> float:
     return (phase_angle + math.pi) % (2 * math.pi) - math.pi
     ...
 
-moving_average_window_size = 2
+moving_average_window_size = 4
 moving_average_array: list[float] = []
 def moving_average(new_entry: float) -> float:
 
@@ -298,12 +298,43 @@ try:
                         response_cir = parse_cir_line(parts[2])
                         final_cir = parse_cir_line(parts[3])
                         post_final_cir = parse_cir_line(parts[4])
+                        post_post_final_cir = parse_cir_line(parts[5])
+
+
 
                         # #this method is not supposed to handle this, but we're doing it anyways
-                        # carrier_integrators = parse_cir_line(parts[4])
-                        # #constants pulled from the qorvo API
-                        # FREQ_OFFSET_MULTIPLIER = (998.4e6 / 2.0 / 1024.0 / 131072.0)
-                        # HERTZ_TO_PPM_MULTIPLIER_CHAN_5 = (-1.0e6 / 6489.6e6)
+                        carrier_integrators = parse_cir_line(parts[6])
+                        poll_ci = carrier_integrators[0][0]
+                        final_ci = carrier_integrators[1][0]
+                        post_final_ci = carrier_integrators[0][1]
+                        post_post_final_ci = carrier_integrators[1][1]
+                        remote_held_time = carrier_integrators[0][2]
+                        local_held_time = carrier_integrators[1][2]
+
+
+                        #constants pulled from the qorvo API
+                        FREQ_OFFSET_MULTIPLIER = (998.4e6 / 2.0 / 1024.0 / 131072.0)
+                        HERTZ_TO_PPM_MULTIPLIER_CHAN_5 = (-1.0e6 / 6489.6e6)
+
+                        poll_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * poll_ci
+                        final_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * final_ci
+                        post_final_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * post_final_ci
+                        post_post_final_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * post_post_final_ci
+
+                        poll_rotations_per_sample = 2 * math.pi * poll_freq_offset_hz * (1. / 499.22e6)
+                        final_rotations_per_sample = 2 * math.pi * final_freq_offset_hz * (1. / 499.22e6)
+                        post_final_rotations_per_sample = 2 * math.pi * post_final_freq_offset_hz * (1. / 499.22e6)
+                        post_post_final_rotations_per_sample = 2 * math.pi * post_post_final_freq_offset_hz * (1. / 499.22e6)
+
+                        foffset = 2*math.pi*post_final_freq_offset_hz*8000e-9
+
+                        clock_offset = (remote_held_time - local_held_time) / local_held_time
+                        freq_offset = 6489.6e6 * clock_offset
+                        foffset2 = 2*math.pi*freq_offset*8000e-9
+
+
+
+
                         # #read in carrier integrators and first path index values
                         # anchor_ci = carrier_integrators[0][0]
                         # tag_ci = carrier_integrators[1][0]
@@ -344,6 +375,8 @@ try:
                                 final_cir[0][i] += 2 * math.pi
                             if(post_final_cir[0][i] < 0):
                                 post_final_cir[0][i] += 2 * math.pi
+                            if(post_post_final_cir[0][i] < 0):
+                                post_post_final_cir[0][i] += 2 * math.pi
 
 
 
@@ -355,17 +388,17 @@ try:
                         for i in range(len(poll_cir[0])):
                             x_vals.append(float(i))
 
-                        cancled_cir = poll_cir[0][9] + response_cir[0][9] - (final_cir[0][9] - post_final_cir[0][9])
+                        #cancled_cir = poll_cir[0][9] + response_cir[0][9] - (final_cir[0][9] - post_final_cir[0][9])
+                        cancled_cir = poll_cir[0][9] + response_cir[0][9] - foffset2# - (post_final_cir[0][9] - post_post_final_cir[0][9])
 
-                        #cancled_cir = cancled_cir % (2 * math.pi)
-                        #inverted_cir = (cancled_cir + math.pi) % (2 * math.pi)
-                        #delta_cir = cancled_cir - last_canceled_cir
-                        #orig_cir = cancled_cir
-                        #if(abs(last_canceled_cir - inverted_cir) < abs(last_canceled_cir - cancled_cir)):
-                        #    cancled_cir = inverted_cir
-                        #    print(f"Should invert {inverted_cir}")                        
-                        #last_canceled_cir = orig_cir
+                        #difference between these two values is around 0 or around 2pi (0)
+                        subs1 = (final_cir[0][9] - post_final_cir[0][9]) % (2 * math.pi)
+                        subs2 = (post_final_cir[0][9] - post_post_final_cir[0][9]) % (2 * math.pi)
 
+                        subsbig = (final_cir[0][9] - post_post_final_cir[0][9])# % (2 * math.pi)
+
+                        phase_cancellation_diff = (subs1 - subs2)
+                        print(f"Fine-Grain: {subs1:.2f}\t|| CarrierInteg: {post_final_freq_offset_hz:.4f}\t|| HeldTime Ratio: {freq_offset:.4f}\t|| {(post_final_freq_offset_hz - freq_offset):.4f}")
 
 
                         #cancled_cir2 = anchor_cir[0][9] - tag_cir[0][9] + post_final_cir[0][9]
@@ -401,7 +434,7 @@ try:
                                         x_vals, response_cir[1], #tag mag
                                         x_vals, poll_cir[0], #anchor phase
                                         x_vals, response_cir[0], #tag phase
-                                        cancled_cir, response_cir[0][9], response_cir[0][9]
+                                        cancled_cir, foffset, subs2
                                         )
                         
 

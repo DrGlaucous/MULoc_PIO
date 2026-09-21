@@ -242,7 +242,7 @@ void set_channel_config(bool is_freq_5) {
 }
 
 //set the time at which the next transaction should happen
-//takes the time in microseconds until the next transaction, returns it in radio units
+//takes the time in microseconds until the next transaction, returns the scheduled timestamp in radio units
 uint64_t set_outgoing_time(uint64_t turnaround_time_micros, uint64_t rx_time_radio) {
     
     //convert micros to DWT tome and add it to the radio time, then shift it into the delay time register since that one chops off the LSByte
@@ -352,6 +352,7 @@ void loop_initiator() {
     );
     send_packet(poll_packet, DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
 
+    auto poll_tx_timestamp = radio->get_tx_timestamp_u64();
 
     //wait for response
     auto response = 0;
@@ -387,6 +388,11 @@ void loop_initiator() {
         final_cirdebug.set_acc_offset(fp_index);
         final_cirdebug.set_carrier_integrator(radio->dwt_readcarrierintegrator());
 
+        //calculate final packet outgoing time
+        auto final_tx_timestamp = set_outgoing_time(TURNAROUND_TIME_US + 1000, radio->get_rx_timestamp_u64());
+        auto held_time = final_tx_timestamp - poll_tx_timestamp;
+        final_cirdebug.set_held_time((uint32_t)held_time);
+
         auto final_packet = UWBPacket(
             get_uuid(),
             UWBPacket::BROADCAST_MAC,
@@ -395,19 +401,24 @@ void loop_initiator() {
             final_cirdebug.get_compiled_len()
         );
 
-        //send final packet
-        set_outgoing_time(TURNAROUND_TIME_US, radio->get_rx_timestamp_u64());
 
         //send final
         if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
 
             radio->clear_system_status();
-            set_outgoing_time(TURNAROUND_TIME_US, radio->get_tx_timestamp_u64());
+            set_outgoing_time(TURNAROUND_TIME_US + 2000, radio->get_tx_timestamp_u64());
 
             //send post-final
             if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
                 radio->clear_system_status();
-                digitalWrite(LED_D9, false);
+
+                //send post-post-POST final (wow)
+                set_outgoing_time(TURNAROUND_TIME_US + 3000, radio->get_tx_timestamp_u64());
+                if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
+                    digitalWrite(LED_D9, false);
+                } else {
+                    Serial.println("Send Post-post-Final Error");
+                }
             } else {
                 Serial.println("Send Post-Final Error");
             }
@@ -497,6 +508,8 @@ void loop_responder() {
 
             if(final_status == 1) {
                 
+                radio->clear_system_status();
+                
                 //save the response CIR data
                 auto final_rx_timestamp = radio->get_rx_timestamp_u64();
                 auto final_packet = get_packet();
@@ -517,7 +530,9 @@ void loop_responder() {
                 } while(post_final_status == 0);
 
                 if(post_final_status == 1) {
-                    digitalWrite(LED_D9, true); //LED off 
+
+                    radio->clear_system_status();
+
 
                     auto post_final_rx_timestamp = radio->get_rx_timestamp_u64();
                     auto post_final_packet = get_packet();
@@ -530,39 +545,81 @@ void loop_responder() {
                     post_final_cirdebug.set_poa(radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1)); //store the phase of arrival too
                     
 
-                    Serial.println("A");
-                    print_cir_packet(poll_gleaned_info);
-                    Serial.println();
-                    print_cir_packet(response_gleaned_info);
-                    Serial.println();
-                    print_cir_packet(final_gleaned_info);
-                    Serial.println();
-                    print_cir_packet(post_final_cirdebug);
+                    radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
+                    auto post_post_final_status = 0;
+                    do {
+                        post_post_final_status = clone_check_for_rx();
+                    } while(post_post_final_status == 0);
+
+                    if(post_post_final_status == 1) {
+
+                        digitalWrite(LED_D9, true); //LED off 
+
+                        
+                        //save the ppf CIR data
+                        CirDebugPacket post_post_final_cirdebug = CirDebugPacket();
+                        fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
+                        post_post_final_cirdebug.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
+                        post_post_final_cirdebug.set_carrier_integrator(radio->dwt_readcarrierintegrator()); //store carrier integrator for reverse compensation later
+                        post_post_final_cirdebug.set_poa(radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1)); //store the phase of arrival too
+
+                        
+
+                        //held time by remote
+                        uint32_t remote_held_time = response_gleaned_info.held_time();
+                        //same time by local
+                        uint32_t local_held_time = final_rx_timestamp - poll_rx_timestamp;
+
+                        Serial.println("A");
+                        print_cir_packet(poll_gleaned_info);
+                        Serial.println();
+                        print_cir_packet(response_gleaned_info);
+                        Serial.println();
+                        print_cir_packet(final_gleaned_info);
+                        Serial.println();
+                        print_cir_packet(post_final_cirdebug);
+                        Serial.println();
+                        print_cir_packet(post_post_final_cirdebug);
 
 
-                    // Serial.println();
-                    // Serial.print(carrier_integrator_0);
-                    // Serial.print(",");
-                    // Serial.print(carrier_integrator_tag);
-                    // Serial.print(",");
+                        Serial.println();
+                        Serial.print(poll_gleaned_info.get_carrier_integrator());
+                        Serial.print(",");
+                        Serial.print(final_gleaned_info.get_carrier_integrator());
+                        Serial.print(",");
 
-                    // Serial.print(carrier_integrator_1);
-                    // Serial.print(",");
-                    // Serial.print(fp_index_tag);
-                    // Serial.print(",");
-
-                    // Serial.print(fp_index_0);
-                    // Serial.print(",");
-                    // Serial.print(fp_index_1);
-                    // Serial.print(",");
-
-                    // Serial.print(ip_poa_signed);
-                    // Serial.print(",");
-                    // Serial.print(ip_poa_tag);
+                        Serial.print(post_final_cirdebug.get_carrier_integrator());
+                        Serial.print(",");
+                        Serial.print(post_post_final_cirdebug.get_carrier_integrator());
+                        Serial.print(",");
 
 
-                    Serial.println();
-                    Serial.println("B");
+                        Serial.print(remote_held_time);
+                        Serial.print(",");
+                        Serial.print(local_held_time);
+                        // Serial.print(",");
+
+                        // Serial.print(fp_index_0);
+                        // Serial.print(",");
+                        // Serial.print(fp_index_1);
+                        // Serial.print(",");
+
+                        // Serial.print(ip_poa_signed);
+                        // Serial.print(",");
+                        // Serial.print(ip_poa_tag);
+
+
+                        Serial.println();
+                        Serial.println("B");
+
+
+
+
+                    }
+                    else {
+                        Serial.print("PPFS Error: ");
+                        Serial.println(post_post_final_status);
+                    }
 
 
 

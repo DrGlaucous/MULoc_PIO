@@ -23,6 +23,7 @@ typedef enum RangingFrameNum {
     Request = 0,
     Response = 1,
     Final = 2,
+    PostFinal = 3,
 } RangingFrameNum;
 
 
@@ -71,13 +72,14 @@ class RangingPacket {
     public:
     
     //times are 40 bits long
-    static const uint8_t TOTAL_LENGTH = 5 + 5 + 1;
+    static const uint8_t TOTAL_LENGTH = 5 + 5 + 1 + 1 + 6;
 
     //see page 249 to see how these packets are structured
     static const uint8_t TIME_REPLY_U64_ID = 0; //the total time it took from getting a packet to sending out a response
     static const uint8_t TIME_ROUND_U64_ID = 5; //the round trip time for the first leg of the DSTWR (we don't need this for single-sided ranging)
-    static const uint8_t FRAME_NO_ID = 10; //used to determine what stage of the ranging process we're in
-
+    static const uint8_t FRAME_TYPE_ID = 10; //used to determine what stage of the ranging process we're in
+    static const uint8_t SEQ_NO_ID = 11; //what order this packet is part of
+    static const uint8_t COMPLEX_PHASE_ID = 12; //3+3 bytes
 
 
     private:
@@ -88,13 +90,17 @@ class RangingPacket {
     public:
 
     //construct from individual components
-    RangingPacket(uint64_t time_reply, uint64_t time_round, RangingFrameNum frame_no) {
+    //time_reply is the time we got the data in,
+    //time_round is how long we held on to the packet before sending it back,
+    //frame_type is what flavor of frame is being sent
+    //sequence_no is what number in the greater sequence order this packet is part of (I.E. each round of a token ring will have the same seq_no)
+    RangingPacket(uint64_t time_reply, uint64_t time_round, RangingFrameNum frame_type) {
 
         //not 8-byte aligned, so we have to do bytewise copy
         PacketHelpers::num_to_byte_array(time_reply, payload + TIME_REPLY_U64_ID, 5);
         PacketHelpers::num_to_byte_array(time_round, payload + TIME_ROUND_U64_ID, 5);
 
-        payload[FRAME_NO_ID] = frame_no;
+        payload[FRAME_TYPE_ID] = frame_type;
 
     }
 
@@ -114,8 +120,8 @@ class RangingPacket {
     }
     
     //return the frame number
-    RangingFrameNum get_frame_no() const {
-        return (RangingFrameNum)payload[FRAME_NO_ID];
+    RangingFrameNum get_frame_type() const {
+        return (RangingFrameNum)payload[FRAME_TYPE_ID];
     }
 
     //return the whole flight-ready packet
@@ -145,14 +151,14 @@ class CirDebugPacket {
     static const uint8_t ACC_LENGTH = VALUE_COUNT * SINGLE_LENGTH;
 
     //the total size of the packet (max: 107 bytes)
-    static const uint8_t TOTAL_LENGTH = ACC_LENGTH + 2 + 3 + 2;
+    static const uint8_t TOTAL_LENGTH = ACC_LENGTH + 2 + 3 + 2 + 4;
 
     //offsets
-    static const uint8_t ACC_PAYLOAD_ID = 7; //holds the samples
-    static const uint8_t ACC_OFFSET_ID = 0; //holds the value in the ACC buffer where the first sample is read (2 bytes)
+    static const uint8_t ACC_PAYLOAD_ID = 11; //holds the samples
+    static const uint8_t ACC_OFFSET_ID = 0; //2 bytes holds the value in the ACC buffer where the first sample is read (2 bytes)
     static const uint8_t CARRIER_INTEGRATOR_OFFSET_ID = 2; //3 bytes, holds the carrier integrator value
     static const uint8_t PHASE_OF_ARRIVAL_OFFSET_ID = 5; //2 bytes, holds the ipatovPOA value
-
+    static const uint8_t HELD_TIME_ID = 7; //4 bytes, holds a delta time in radio units
 
     private:
 
@@ -247,6 +253,13 @@ class CirDebugPacket {
     }
     int16_t get_poa() const {
         return (int16_t)PacketHelpers::byte_array_to_num(payload + PHASE_OF_ARRIVAL_OFFSET_ID, 2);
+    }
+
+    void set_held_time(uint32_t held_time) {
+        PacketHelpers::num_to_byte_array(held_time, payload + HELD_TIME_ID, 4);
+    }
+    uint32_t held_time() {
+        return PacketHelpers::byte_array_to_num(payload + HELD_TIME_ID, 4);
     }
 
 
