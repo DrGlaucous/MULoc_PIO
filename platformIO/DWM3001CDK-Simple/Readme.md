@@ -21,9 +21,9 @@ I need to figure out how to derive B given A and C. Is this possible?
 
 
 
-
+This isn't a 
 I have 4 phase angles measured in radians.
-Let's call them:
+I'm going to call call them:
 A
 B
 C
@@ -31,13 +31,14 @@ D
 All are bounded between [0,2pi].
 I know A, C, and D
 
-let variables
-f = 0.4
-g = 0.3
+The difference between A and B is some known percentage (say, 20%) of the difference between B and C.
+The difference between A and B is a different known percentage (say, 10%) of the difference between B and D.
+The percentages will always be the same; they're a constant that I can control.
+I can't make any other guarantees about the values; they're essentially random.
 
-(A - B) = f*(C-A)
-(A - B) = g*(D-A)
-How can I derive B in terms of these other measurements? Is it possible?
+I know with just angles A, B, and C, I don't have enough information to derive a single answer; I'll always have 2.
+If I add in angle D, do I have enough info to constrain B to a single angle? How would I do this?
+
 
 
 

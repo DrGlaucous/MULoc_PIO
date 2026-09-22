@@ -389,7 +389,7 @@ void loop_initiator() {
         final_cirdebug.set_carrier_integrator(radio->dwt_readcarrierintegrator());
 
         //calculate final packet outgoing time
-        auto final_tx_timestamp = set_outgoing_time(TURNAROUND_TIME_US + 1000, radio->get_rx_timestamp_u64());
+        auto final_tx_timestamp = set_outgoing_time(TURNAROUND_TIME_US, radio->get_rx_timestamp_u64());
         auto held_time = final_tx_timestamp - poll_tx_timestamp;
         final_cirdebug.set_held_time((uint32_t)held_time);
 
@@ -406,16 +406,27 @@ void loop_initiator() {
         if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
 
             radio->clear_system_status();
-            set_outgoing_time(TURNAROUND_TIME_US + 2000, radio->get_tx_timestamp_u64());
+            set_outgoing_time(TURNAROUND_TIME_US, radio->get_tx_timestamp_u64());
 
             //send post-final
             if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
                 radio->clear_system_status();
 
                 //send post-post-POST final (wow)
-                set_outgoing_time(TURNAROUND_TIME_US + 3000, radio->get_tx_timestamp_u64());
+                set_outgoing_time(TURNAROUND_TIME_US, radio->get_tx_timestamp_u64());
                 if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
-                    digitalWrite(LED_D9, false);
+
+                    //send pppf
+                    set_outgoing_time(TURNAROUND_TIME_US, radio->get_tx_timestamp_u64());
+                    if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
+    
+                        digitalWrite(LED_D9, false);
+    
+                    } else {
+                        Serial.println("Send P3-Final Error");
+                    }
+
+
                 } else {
                     Serial.println("Send Post-post-Final Error");
                 }
@@ -431,7 +442,7 @@ void loop_initiator() {
     }
 
     digitalWrite(LED_D9, true); //LED off
-    delay(50);
+    delay(200);
 
 }
 
@@ -553,7 +564,9 @@ void loop_responder() {
 
                     if(post_post_final_status == 1) {
 
-                        digitalWrite(LED_D9, true); //LED off 
+
+
+                        radio->clear_system_status();
 
                         
                         //save the ppf CIR data
@@ -563,54 +576,77 @@ void loop_responder() {
                         post_post_final_cirdebug.set_carrier_integrator(radio->dwt_readcarrierintegrator()); //store carrier integrator for reverse compensation later
                         post_post_final_cirdebug.set_poa(radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1)); //store the phase of arrival too
 
-                        
 
-                        //held time by remote
-                        uint32_t remote_held_time = response_gleaned_info.held_time();
-                        //same time by local
-                        uint32_t local_held_time = final_rx_timestamp - poll_rx_timestamp;
+                        radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
+                        auto p3f_status = 0;
+                        do {
+                            p3f_status = clone_check_for_rx();
+                        } while(p3f_status == 0);
+                        if(p3f_status == 1) {
 
-                        Serial.println("A");
-                        print_cir_packet(poll_gleaned_info);
-                        Serial.println();
-                        print_cir_packet(response_gleaned_info);
-                        Serial.println();
-                        print_cir_packet(final_gleaned_info);
-                        Serial.println();
-                        print_cir_packet(post_final_cirdebug);
-                        Serial.println();
-                        print_cir_packet(post_post_final_cirdebug);
+                            //save the pppf CIR data
+                            CirDebugPacket p3f_cirdebug = CirDebugPacket();
+                            fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
+                            p3f_cirdebug.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
+                            p3f_cirdebug.set_carrier_integrator(radio->dwt_readcarrierintegrator()); //store carrier integrator for reverse compensation later
+                            p3f_cirdebug.set_poa(radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1)); //store the phase of arrival too
 
 
-                        Serial.println();
-                        Serial.print(poll_gleaned_info.get_carrier_integrator());
-                        Serial.print(",");
-                        Serial.print(final_gleaned_info.get_carrier_integrator());
-                        Serial.print(",");
 
-                        Serial.print(post_final_cirdebug.get_carrier_integrator());
-                        Serial.print(",");
-                        Serial.print(post_post_final_cirdebug.get_carrier_integrator());
-                        Serial.print(",");
+                            digitalWrite(LED_D9, true); //LED off 
 
+                            //held time by remote
+                            uint32_t remote_held_time = response_gleaned_info.held_time();
+                            //same time by local
+                            uint32_t local_held_time = final_rx_timestamp - poll_rx_timestamp;
 
-                        Serial.print(remote_held_time);
-                        Serial.print(",");
-                        Serial.print(local_held_time);
-                        // Serial.print(",");
-
-                        // Serial.print(fp_index_0);
-                        // Serial.print(",");
-                        // Serial.print(fp_index_1);
-                        // Serial.print(",");
-
-                        // Serial.print(ip_poa_signed);
-                        // Serial.print(",");
-                        // Serial.print(ip_poa_tag);
+                            Serial.println("A");
+                            print_cir_packet(poll_gleaned_info);
+                            Serial.println();
+                            print_cir_packet(response_gleaned_info);
+                            Serial.println();
+                            print_cir_packet(final_gleaned_info);
+                            Serial.println();
+                            print_cir_packet(post_final_cirdebug);
+                            Serial.println();
+                            print_cir_packet(post_post_final_cirdebug);
+                            Serial.println();
+                            print_cir_packet(p3f_cirdebug);
 
 
-                        Serial.println();
-                        Serial.println("B");
+                            Serial.println();
+                            Serial.print(poll_gleaned_info.get_carrier_integrator());
+                            Serial.print(",");
+                            Serial.print(final_gleaned_info.get_carrier_integrator());
+                            Serial.print(",");
+
+                            Serial.print(post_final_cirdebug.get_carrier_integrator());
+                            Serial.print(",");
+                            Serial.print(post_post_final_cirdebug.get_carrier_integrator());
+                            Serial.print(",");
+
+
+                            Serial.print(remote_held_time);
+                            Serial.print(",");
+                            Serial.print(local_held_time);
+                            // Serial.print(",");
+
+                            // Serial.print(fp_index_0);
+                            // Serial.print(",");
+                            // Serial.print(fp_index_1);
+                            // Serial.print(",");
+
+                            // Serial.print(ip_poa_signed);
+                            // Serial.print(",");
+                            // Serial.print(ip_poa_tag);
+
+
+                            Serial.println();
+                            Serial.println("B");
+
+
+                        }
+
 
 
 

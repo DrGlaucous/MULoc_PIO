@@ -33,9 +33,9 @@ anchor_phase_ln, = phase_graph.plot([], [], color='r',)
 tag_phase_ln, = phase_graph.plot([], [], color='b',)
 
 
-canceled_phase2_ln, = canceled_graph.plot([], [], color='r')#,  marker='o')
-canceled_phase3_ln, = canceled_graph.plot([], [], color='b')#,  marker='o')
-canceled_phase_ln, = canceled_graph.plot([], [], color='g')#,  marker='o')
+canceled_phase2_ln, = canceled_graph.plot([], [], color='r',  marker='o')
+canceled_phase3_ln, = canceled_graph.plot([], [], color='b',  marker='o')
+canceled_phase_ln, = canceled_graph.plot([], [], color='g',  marker='o')
 canceled_y_array: list[float] = []
 phase_anchor_array: list[float] = []
 phase_tag_array: list[float] = []
@@ -76,7 +76,7 @@ def update_plot_data(
     phase_anchor_array.append(canceled_y2)
     phase_tag_array.append(canceled_y3)
 
-    if(len(canceled_y_array) > 200):
+    if(len(canceled_y_array) > 50):
         canceled_y_array.pop(0)
         phase_anchor_array.pop(0)
         phase_tag_array.pop(0)
@@ -90,8 +90,8 @@ def update_plot_data(
 
     canceled_phase2_ln.set_xdata(canceled_x_vals)
     canceled_phase2_ln.set_ydata(phase_anchor_array)
-    #canceled_phase3_ln.set_xdata(canceled_x_vals)
-    #canceled_phase3_ln.set_ydata(phase_tag_array)
+    canceled_phase3_ln.set_xdata(canceled_x_vals)
+    canceled_phase3_ln.set_ydata(phase_tag_array)
 
     #test: circle
     if display_phase_graph:
@@ -299,11 +299,12 @@ try:
                         final_cir = parse_cir_line(parts[3])
                         post_final_cir = parse_cir_line(parts[4])
                         post_post_final_cir = parse_cir_line(parts[5])
+                        p3f_cir = parse_cir_line(parts[6])
 
 
 
                         # #this method is not supposed to handle this, but we're doing it anyways
-                        carrier_integrators = parse_cir_line(parts[6])
+                        carrier_integrators = parse_cir_line(parts[7])
                         poll_ci = carrier_integrators[0][0]
                         final_ci = carrier_integrators[1][0]
                         post_final_ci = carrier_integrators[0][1]
@@ -380,6 +381,63 @@ try:
 
 
 
+                        phase_a = final_cir[0][9]
+                        phase_b = post_final_cir[0][9] #ground truth
+                        phase_c = post_post_final_cir[0][9]
+                        phase_d = p3f_cir[0][9]
+
+                        a_b_time = 8000
+                        a_c_time = 16000
+                        c_d_time = 8000
+                        a_d_time = a_c_time + c_d_time
+
+                        b_c_time = a_c_time - a_b_time
+                        b_d_time = a_d_time - a_b_time
+
+                        a_c_percent = a_b_time / b_c_time
+                        a_d_percent = a_b_time / b_d_time
+
+                        #b_1 = (phase_a + a_c_percent * phase_c) / 1#(1 + a_c_percent)
+                        #b_2 = (phase_a - a_c_percent * phase_c) / 1#(1 - a_c_percent)
+
+                        #mathematical shortcut for a phase time of 0.5. Need to generalize it over any ratio
+                        b_1 = (phase_a - phase_c) * 0.5
+                        b_2 = b_1 + math.pi
+
+                        b_1 = b_1 % (2 * math.pi)
+                        b_2 = b_2 % (2 * math.pi)
+
+                        #either b1 or b2 will be the correct answer at this point, but new need to figure out which one to pick using only phase_d
+
+                        def shortest_angular_distance(angle_1: float, angle_2: float) -> float:
+                            return math.pi - abs(math.pi - abs(angle_1 - angle_2))
+
+                        sha_dis_1 = shortest_angular_distance(phase_a, b_1)
+                        sha_dis_2 = a_d_percent * shortest_angular_distance(b_1, phase_d)
+
+                        sha_dis_3 = shortest_angular_distance(phase_a, b_2)
+                        sha_dis_4 = a_d_percent * shortest_angular_distance(b_2, phase_d)
+
+                        #if(shortest_angular_distance(phase_a, b_1) == a_d_percent * shortest_angular_distance(b_1, phase_d)):
+                        #    print("A")
+                        #    ...
+
+
+
+                        #difference between these two values is around 0 or around 2pi (0)
+                        subs1 = (phase_a - phase_b) % (2 * math.pi)
+                        subs2 = (phase_b - phase_c) % (2 * math.pi)
+
+                        subsbig = b_1 #(phase_a - phase_c) % (2 * math.pi)
+
+                        phase_cancellation_diff = (subs1 - subs2)
+                        print(f"Subs1: {subs1:.2f}\t|| subs2: {subs2:.4f}\t|| subsbig: {subsbig:.4f}")
+
+                        #subs2 = 0
+
+
+
+
 
 
 
@@ -389,16 +447,7 @@ try:
                             x_vals.append(float(i))
 
                         #cancled_cir = poll_cir[0][9] + response_cir[0][9] - (final_cir[0][9] - post_final_cir[0][9])
-                        cancled_cir = poll_cir[0][9] + response_cir[0][9] - foffset2# - (post_final_cir[0][9] - post_post_final_cir[0][9])
-
-                        #difference between these two values is around 0 or around 2pi (0)
-                        subs1 = (final_cir[0][9] - post_final_cir[0][9]) % (2 * math.pi)
-                        subs2 = (post_final_cir[0][9] - post_post_final_cir[0][9]) % (2 * math.pi)
-
-                        subsbig = (final_cir[0][9] - post_post_final_cir[0][9])# % (2 * math.pi)
-
-                        phase_cancellation_diff = (subs1 - subs2)
-                        print(f"Fine-Grain: {subs1:.2f}\t|| CarrierInteg: {post_final_freq_offset_hz:.4f}\t|| HeldTime Ratio: {freq_offset:.4f}\t|| {(post_final_freq_offset_hz - freq_offset):.4f}")
+                        cancled_cir = poll_cir[0][9] + response_cir[0][9] - (post_final_cir[0][9] - post_post_final_cir[0][9])
 
 
                         #cancled_cir2 = anchor_cir[0][9] - tag_cir[0][9] + post_final_cir[0][9]
@@ -434,7 +483,7 @@ try:
                                         x_vals, response_cir[1], #tag mag
                                         x_vals, poll_cir[0], #anchor phase
                                         x_vals, response_cir[0], #tag phase
-                                        cancled_cir, foffset, subs2
+                                        subsbig, subs1, subs2
                                         )
                         
 
