@@ -402,22 +402,22 @@ void loop_initiator() {
         );
 
 
-        //send final
+        //send final A
         if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
 
             radio->clear_system_status();
-            set_outgoing_time(TURNAROUND_TIME_US, radio->get_tx_timestamp_u64());
 
-            //send post-final
+            //send post-final B
+            set_outgoing_time(TURNAROUND_TIME_US, radio->get_tx_timestamp_u64());
             if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
                 radio->clear_system_status();
 
-                //send post-post-POST final (wow)
-                set_outgoing_time(TURNAROUND_TIME_US, radio->get_tx_timestamp_u64());
+                //send post-post-POST final (wow) C
+                set_outgoing_time(TURNAROUND_TIME_US + 3000, radio->get_tx_timestamp_u64());
                 if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
 
-                    //send pppf
-                    set_outgoing_time(TURNAROUND_TIME_US, radio->get_tx_timestamp_u64());
+                    //send pppf D
+                    set_outgoing_time(TURNAROUND_TIME_US + 2200, radio->get_tx_timestamp_u64());
                     if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
     
                         digitalWrite(LED_D9, false);

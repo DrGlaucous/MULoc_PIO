@@ -76,7 +76,7 @@ def update_plot_data(
     phase_anchor_array.append(canceled_y2)
     phase_tag_array.append(canceled_y3)
 
-    if(len(canceled_y_array) > 50):
+    if(len(canceled_y_array) > 200):
         canceled_y_array.pop(0)
         phase_anchor_array.pop(0)
         phase_tag_array.pop(0)
@@ -387,8 +387,8 @@ try:
                         phase_d = p3f_cir[0][9]
 
                         a_b_time = 8000
-                        a_c_time = 16000
-                        c_d_time = 8000
+                        a_c_time = 19000
+                        c_d_time = 10200
                         a_d_time = a_c_time + c_d_time
 
                         b_c_time = a_c_time - a_b_time
@@ -401,26 +401,53 @@ try:
                         #b_2 = (phase_a - a_c_percent * phase_c) / 1#(1 - a_c_percent)
 
                         #mathematical shortcut for a phase time of 0.5. Need to generalize it over any ratio
-                        b_1 = (phase_a - phase_c) * 0.5
+                        b_1 = (phase_a - phase_c) * (a_b_time / a_c_time)
                         b_2 = b_1 + math.pi
-
                         b_1 = b_1 % (2 * math.pi)
                         b_2 = b_2 % (2 * math.pi)
 
                         #either b1 or b2 will be the correct answer at this point, but new need to figure out which one to pick using only phase_d
+                        b_3 = (phase_a - phase_d) * (a_b_time / a_d_time)
+                        b_4 = b_3 + math.pi
+                        b_3 = b_3 % (2 * math.pi)
+                        b_4 = b_4 % (2 * math.pi)
 
+                        b_5 = (phase_c - phase_d) * (a_b_time / c_d_time)
+                        b_6 = b_5 + math.pi
+                        b_5 = b_5 % (2 * math.pi)
+                        b_6 = b_6 % (2 * math.pi)
+
+                        #of the four points calculated above, find the two that are closest together (those should be the correct offset)
                         def shortest_angular_distance(angle_1: float, angle_2: float) -> float:
-                            return math.pi - abs(math.pi - abs(angle_1 - angle_2))
+                            return abs((angle_1 - angle_2 + math.pi) % (2 * math.pi) - math.pi)
 
-                        sha_dis_1 = shortest_angular_distance(phase_a, b_1)
-                        sha_dis_2 = a_d_percent * shortest_angular_distance(b_1, phase_d)
+                        sha_dis_1 = shortest_angular_distance(b_1, b_3)
+                        sha_dis_2 = a_d_percent * shortest_angular_distance(b_1, b_4)
 
-                        sha_dis_3 = shortest_angular_distance(phase_a, b_2)
-                        sha_dis_4 = a_d_percent * shortest_angular_distance(b_2, phase_d)
+                        sha_dis_3 = shortest_angular_distance(b_2, b_3)
+                        sha_dis_4 = a_d_percent * shortest_angular_distance(b_2, b_4)
 
-                        #if(shortest_angular_distance(phase_a, b_1) == a_d_percent * shortest_angular_distance(b_1, phase_d)):
-                        #    print("A")
-                        #    ...
+                        sha_dis_5 = a_d_percent * shortest_angular_distance(b_2, b_4)
+                        sha_dis_6 = a_d_percent * shortest_angular_distance(b_2, b_4)
+
+                        sha_dis_list = [sha_dis_1, sha_dis_2, sha_dis_3, sha_dis_4]
+                        shortest_dist = min(sha_dis_list)
+
+                        #draw a conclusion from the point we found
+                        found_phase_b_diff = 0.0
+                        if(shortest_dist == sha_dis_1):
+                            found_phase_b_diff = (b_1 + b_3) * 0.5
+                            ...
+                        elif(shortest_dist == sha_dis_2):
+                            found_phase_b_diff = (b_1 + b_4) * 0.5
+                            ...
+                        elif(shortest_dist == sha_dis_3):
+                            found_phase_b_diff = (b_2 + b_3) * 0.5
+                            ...
+                        else:
+                            found_phase_b_diff = (b_2 + b_4) * 0.5
+                            ...
+
 
 
 
@@ -446,8 +473,9 @@ try:
                         for i in range(len(poll_cir[0])):
                             x_vals.append(float(i))
 
-                        #cancled_cir = poll_cir[0][9] + response_cir[0][9] - (final_cir[0][9] - post_final_cir[0][9])
-                        cancled_cir = poll_cir[0][9] + response_cir[0][9] - (post_final_cir[0][9] - post_post_final_cir[0][9])
+                        cancled_cir_1 = poll_cir[0][9] + response_cir[0][9] - (final_cir[0][9] - post_final_cir[0][9])
+                        cancled_cir_2 = poll_cir[0][9] + response_cir[0][9] - (post_final_cir[0][9] - post_post_final_cir[0][9])
+                        cancled_cir_3 = poll_cir[0][9] + response_cir[0][9] - found_phase_b_diff
 
 
                         #cancled_cir2 = anchor_cir[0][9] - tag_cir[0][9] + post_final_cir[0][9]
@@ -455,7 +483,10 @@ try:
 
                         #the version in the paper varies by about 0.6 radians
 
-                        cancled_cir = cancled_cir % (2 * math.pi)
+                        cancled_cir_1 = cancled_cir_1 % (2 * math.pi)
+                        cancled_cir_2 = cancled_cir_2 % (2 * math.pi)
+                        cancled_cir_3 = cancled_cir_3 % (2 * math.pi)
+
                         #cancled_cir = moving_average(cancled_cir)
 
                         #last_inverted_cir = (last_canceled_cir + math.pi) % (2 * math.pi)
@@ -483,7 +514,7 @@ try:
                                         x_vals, response_cir[1], #tag mag
                                         x_vals, poll_cir[0], #anchor phase
                                         x_vals, response_cir[0], #tag phase
-                                        subsbig, subs1, subs2
+                                        cancled_cir_1, 0, cancled_cir_3
                                         )
                         
 
