@@ -293,13 +293,23 @@ try:
 
 
                         parts = re.split(r'\n', ascii_string)
+                        poll_cir = ([],[])
+                        response_cir = ([],[])
+                        final_cir = ([],[])
+                        post_final_cir = ([],[])
+                        post_post_final_cir = ([],[])
+                        p3f_cir = ([],[])
 
-                        poll_cir = parse_cir_line(parts[1])
-                        response_cir = parse_cir_line(parts[2])
-                        final_cir = parse_cir_line(parts[3])
-                        post_final_cir = parse_cir_line(parts[4])
-                        post_post_final_cir = parse_cir_line(parts[5])
-                        p3f_cir = parse_cir_line(parts[6])
+                        try:
+                            poll_cir = parse_cir_line(parts[1])
+                            response_cir = parse_cir_line(parts[2])
+                            final_cir = parse_cir_line(parts[3])
+                            post_final_cir = parse_cir_line(parts[4])
+                            post_post_final_cir = parse_cir_line(parts[5])
+                            p3f_cir = parse_cir_line(parts[6])
+                        except:
+                            break
+
 
 
 
@@ -317,6 +327,7 @@ try:
                         FREQ_OFFSET_MULTIPLIER = (998.4e6 / 2.0 / 1024.0 / 131072.0)
                         HERTZ_TO_PPM_MULTIPLIER_CHAN_5 = (-1.0e6 / 6489.6e6)
 
+                        #equivalent units to the cfo variable in the muloc code (may need to be multiplied by -1)
                         poll_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * poll_ci
                         final_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * final_ci
                         post_final_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * post_final_ci
@@ -327,13 +338,34 @@ try:
                         post_final_rotations_per_sample = 2 * math.pi * post_final_freq_offset_hz * (1. / 499.22e6)
                         post_post_final_rotations_per_sample = 2 * math.pi * post_post_final_freq_offset_hz * (1. / 499.22e6)
 
-                        foffset = 2*math.pi*post_final_freq_offset_hz*8000e-9
+                        drift_estimate_from_cfo = (post_final_freq_offset_hz * HERTZ_TO_PPM_MULTIPLIER_CHAN_5)
+                        #foffset = 2*math.pi*post_final_freq_offset_hz*8000e-6
+                        #foffset = 2*math.pi*6489.6e6*drift_estimate_from_cfo*1e-6*8000e-6
+                        foffset = -2*math.pi*post_final_freq_offset_hz*8000e-6
 
-                        clock_offset = (remote_held_time - local_held_time) / local_held_time
+                        
+                        clock_offset = (remote_held_time - local_held_time) / local_held_time                        
                         freq_offset = 6489.6e6 * clock_offset
-                        foffset2 = 2*math.pi*freq_offset*8000e-9
+                        drift_estimate_from_clock = freq_offset * HERTZ_TO_PPM_MULTIPLIER_CHAN_5
+                        foffset2 = -2*math.pi*freq_offset*8000e-6
+                        #foffset2 = 2*math.pi*6489.6e6*drift_estimate_from_clock*1e-6*8000e-6
 
 
+
+
+
+                        #new experiment: residue cancellation using phase values
+                        wrap_factor = 1/(6489.6e6)/8e-3*1e6
+
+                        #determine ambiguity
+                        ambiguity = math.floor((final_freq_offset_hz * HERTZ_TO_PPM_MULTIPLIER_CHAN_5) / wrap_factor)
+                        #determine drift
+
+                        drift_estimate = ((final_cir[0][9] - post_final_cir[0][9]) / (2 * math.pi) + ambiguity) * wrap_factor
+
+                        foffset3 = 2*math.pi*6489.6e6*drift_estimate*1e-6*8000e-6
+
+                        print(f"Foffset: {foffset:.2f}\t|| Foffset2: {foffset2:.4f}\t|| foffset3: {foffset3}")
 
 
                         # #read in carrier integrators and first path index values
@@ -380,7 +412,7 @@ try:
                                 post_post_final_cir[0][i] += 2 * math.pi
 
 
-
+                        #unfortunately, this doesn't have the accuracy needed to reliably cancel our residual
                         phase_a = final_cir[0][9]
                         phase_b = post_final_cir[0][9] #ground truth
                         phase_c = post_post_final_cir[0][9]
@@ -448,9 +480,6 @@ try:
                             found_phase_b_diff = (b_2 + b_4) * 0.5
                             ...
 
-
-
-
                         #difference between these two values is around 0 or around 2pi (0)
                         subs1 = (phase_a - phase_b) % (2 * math.pi)
                         subs2 = (phase_b - phase_c) % (2 * math.pi)
@@ -458,7 +487,7 @@ try:
                         subsbig = b_1 #(phase_a - phase_c) % (2 * math.pi)
 
                         phase_cancellation_diff = (subs1 - subs2)
-                        print(f"Subs1: {subs1:.2f}\t|| subs2: {subs2:.4f}\t|| subsbig: {subsbig:.4f}")
+                        #print(f"Subs1: {subs1:.2f}\t|| subs2: {subs2:.4f}\t|| subsbig: {subsbig:.4f}")
 
                         #subs2 = 0
 
@@ -473,9 +502,9 @@ try:
                         for i in range(len(poll_cir[0])):
                             x_vals.append(float(i))
 
-                        cancled_cir_1 = poll_cir[0][9] + response_cir[0][9] - (final_cir[0][9] - post_final_cir[0][9])
-                        cancled_cir_2 = poll_cir[0][9] + response_cir[0][9] - (post_final_cir[0][9] - post_post_final_cir[0][9])
-                        cancled_cir_3 = poll_cir[0][9] + response_cir[0][9] - found_phase_b_diff
+                        cancled_cir_1 = poll_cir[0][9] + response_cir[0][9] - foffset #(final_cir[0][9] - post_final_cir[0][9])
+                        cancled_cir_2 = poll_cir[0][9] + response_cir[0][9] - foffset2 #(post_final_cir[0][9] - post_post_final_cir[0][9])
+                        cancled_cir_3 = poll_cir[0][9] + response_cir[0][9] - foffset3 #found_phase_b_diff
 
 
                         #cancled_cir2 = anchor_cir[0][9] - tag_cir[0][9] + post_final_cir[0][9]
@@ -514,9 +543,11 @@ try:
                                         x_vals, response_cir[1], #tag mag
                                         x_vals, poll_cir[0], #anchor phase
                                         x_vals, response_cir[0], #tag phase
-                                        cancled_cir_1, 0, cancled_cir_3
+                                        #green, red, blue
+                                        #drift_estimate_from_cfo, drift_estimate_from_clock, drift_estimate
+                                        cancled_cir_1, cancled_cir_2, cancled_cir_3
                                         )
-                        
+
 
 
 

@@ -8,7 +8,7 @@ function cfo_coarse= clock_drift_est_coarse(cfo_dw1000, poa_ch1, poa_ch3, fc1, f
 %   poa_ch3: Phase estimates obtained from channel 3.
 %   fc1: Center frequency of channel 1.
 %   fc3: Center frequency of channel 3.
-%   delta_turn: Time interval between two consecutive rounds of localization.
+%   delta_turn: Time interval between two consecutive rounds of localization. (units are milliseconds 1e-6)
 %
 % Output:
 %   cfo_coarse: Coarse - grained clock drift estimates.
@@ -24,7 +24,7 @@ phase_diff_ch1 =  wrapToPi(poa_ch1(:,2:2:end)-poa_ch1(:,1:2:end));
 phase_diff_ch3 =  wrapToPi(poa_ch3(:,2:2:end)-poa_ch3(:,1:2:end));
 
 % The ambiguity of phase_diff3 is enlarged compared with phase_diff_ch1 and
-% phase_diff_ch3, which can help determine the ambiguity number 
+% phase_diff_ch3, which can help determine the ambiguity number
 phase_diff = phase_diff_ch3-phase_diff_ch1;
 
 % Determine the ambiguity number using DW1000 estimates
@@ -38,7 +38,7 @@ temp(temp-cfo_dw1000(1:2:end) < wrap_factor/2) = temp(temp-cfo_dw1000(1:2:end) <
 % If the difference is greater than half of the wrap factor, subtract the wrap factor.
 temp(temp-cfo_dw1000(1:2:end) > wrap_factor/2) = temp(temp-cfo_dw1000(1:2:end) > wrap_factor/2) -  wrap_factor;
 
-cfo_coarse(:,1:2:end) = temp; 
-cfo_coarse(:,2:2:end) = temp; 
+cfo_coarse(:,1:2:end) = temp;
+cfo_coarse(:,2:2:end) = temp;
 
 end
