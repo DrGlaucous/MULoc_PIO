@@ -77,8 +77,8 @@ class RangingPacket {
     //see page 249 to see how these packets are structured
     static const uint8_t TIME_REPLY_U64_ID = 0; //the total time it took from getting a packet to sending out a response
     static const uint8_t TIME_ROUND_U64_ID = 5; //the round trip time for the first leg of the DSTWR (we don't need this for single-sided ranging)
-    static const uint8_t FRAME_TYPE_ID = 10; //used to determine what stage of the ranging process we're in
-    static const uint8_t SEQ_NO_ID = 11; //what order this packet is part of
+    static const uint8_t FRAME_TYPE_ID = 10; //used to determine what stage of the ranging process we're in (poll, response, final)
+    static const uint8_t SEQ_NO_ID = 11; //what order this packet is part of, used to determine what channel the radio should be using
     static const uint8_t COMPLEX_PHASE_ID = 12; //3+3 bytes
 
 
@@ -94,15 +94,37 @@ class RangingPacket {
     //time_round is how long we held on to the packet before sending it back,
     //frame_type is what flavor of frame is being sent
     //sequence_no is what number in the greater sequence order this packet is part of (I.E. each round of a token ring will have the same seq_no)
-    RangingPacket(uint64_t time_reply, uint64_t time_round, RangingFrameNum frame_type) {
+    RangingPacket(
+        uint64_t time_reply,
+        uint64_t time_round,
+        RangingFrameNum frame_type,
+        uint8_t sequence_no,
+        uint8_t* complex_data
+    ) {
 
         //not 8-byte aligned, so we have to do bytewise copy
         PacketHelpers::num_to_byte_array(time_reply, payload + TIME_REPLY_U64_ID, 5);
         PacketHelpers::num_to_byte_array(time_round, payload + TIME_ROUND_U64_ID, 5);
 
         payload[FRAME_TYPE_ID] = frame_type;
+        payload[SEQ_NO_ID] = sequence_no;
 
+        set_complex(complex_data);
     }
+
+    //use this if we don't want to set the complex data right now
+    RangingPacket(
+        uint64_t time_reply,
+        uint64_t time_round,
+        RangingFrameNum frame_type,
+        uint8_t sequence_no
+    ) {
+        PacketHelpers::num_to_byte_array(time_reply, payload + TIME_REPLY_U64_ID, 5);
+        PacketHelpers::num_to_byte_array(time_round, payload + TIME_ROUND_U64_ID, 5);
+        payload[FRAME_TYPE_ID] = frame_type;
+        payload[SEQ_NO_ID] = sequence_no;
+    }
+
 
     //construct from byte array
     RangingPacket(const uint8_t* payload) {
@@ -132,6 +154,48 @@ class RangingPacket {
     uint8_t get_compiled_len() const {
         return TOTAL_LENGTH;
     }
+
+
+    //set the complex number
+    void set_complex(uint32_t real, uint32_t img) {
+
+        //set reals
+        payload[COMPLEX_PHASE_ID + 0] = (real >> 0) & 0xFF; //lo
+        payload[COMPLEX_PHASE_ID + 1] = (real >> 8) & 0xFF; //mid
+        payload[COMPLEX_PHASE_ID + 2] = (real >> 16) & 0xFF; //high
+
+        //set imgs
+        payload[COMPLEX_PHASE_ID + 3] = (img >> 0) & 0xFF; //lo
+        payload[COMPLEX_PHASE_ID + 4] = (img >> 8) & 0xFF; //mid
+        payload[COMPLEX_PHASE_ID + 5] = (img >> 16) & 0xFF; //high
+
+        return;
+
+    }
+
+    //set the complex number given a raw 6 byte char array with the format [real, 3 bytes][imaginary, 3 bytes]
+    //this is the same format we get when we read it with dwt_readaccadata
+    void set_complex(uint8_t* raw_data) {
+        memcpy(payload + COMPLEX_PHASE_ID, raw_data, 6);
+    }
+
+    //get the complex number
+    void get_complex(uint32_t* real, uint32_t* img) const {
+        if(real == nullptr || img == nullptr) {
+            return;
+        }
+
+        *real = payload[COMPLEX_PHASE_ID + 0] << 0
+        | payload[COMPLEX_PHASE_ID + 1] << 8
+        | payload[COMPLEX_PHASE_ID + 2] << 16;
+
+        *img = payload[COMPLEX_PHASE_ID + 3] << 0
+        | payload[COMPLEX_PHASE_ID + 4] << 8
+        | payload[COMPLEX_PHASE_ID + 5] << 16;
+
+        return;
+    }
+
 
 };
 

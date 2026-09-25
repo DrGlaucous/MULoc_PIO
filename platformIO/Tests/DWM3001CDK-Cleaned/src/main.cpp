@@ -189,29 +189,6 @@ int clone_check_for_rx() {
 
 	}
 
-//blocks until the radio gets a message in or until timeout_ms is reached.
-//we can also wait for timeout using dwt_setrxtimeout...
-//the radio must already be set to the correct mode with a fast command!
-//returns 0 on timeout, 1 on success, 2 on bad checksum, 3 on general error
-int wait_for_message_with_timeout(uint32_t timeout_ms, bool no_timeout = false) {
-
-
-	bool got_response = false;
-	bool error = false;
-	auto tx_time = millis();
-	while(no_timeout || (millis() - tx_time < timeout_ms)) {
-		auto response = radio->check_for_rx();
-        if(response) {
-            return response;
-        }
-
-	}
-
-	return 0;
-
-
-}
-
 
 //set the radio's output channel
 void set_channel_config(bool is_freq_5) {
@@ -342,7 +319,7 @@ void loop_initiator() {
     digitalWrite(LED_D9, false); //LED on 
 
     //kick off poll
-    auto poll_ranging = RangingPacket(0, 0, RangingFrameNum::Request);
+    auto poll_ranging = RangingPacket(0, 0, RangingFrameNum::Request, 0);
     UWBPacket poll_packet = UWBPacket(
         get_uuid(),
         UWBPacket::BROADCAST_MAC,
@@ -352,6 +329,7 @@ void loop_initiator() {
     );
     send_packet(poll_packet, DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
 
+    //record when we sent it
     auto poll_tx_timestamp = radio->get_tx_timestamp_u64();
 
     //wait for response
@@ -360,45 +338,32 @@ void loop_initiator() {
         response = clone_check_for_rx();
     } while(response == 0);
 
+    //got response
     if(response == 1) {
 
         radio->clear_system_status();
         
-        //Serial.println("Success");
-        //dwt_rxdiag_t diagnostics = {};
-        //radio->dwt_readdiagnostics(&diagnostics);
-        //uint16_t fp_index = diagnostics.ipatovFpIndex >> 6;
-        //test: compare these values
-        //dwt_rxdiag_t diagnostics = {};
-        //radio->dwt_readdiagnostics(&diagnostics);
-        //uint16_t ip_poa = diagnostics.ipatovPOA;
-
-        //read phase of arrival and convert to signed
-        uint16_t ip_poa = radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1);
-        //int16_t ip_poa_signed = (int16_t)((ip_poa & 0x3FFF)|((ip_poa & 0x2000)?0xC000:0x0000));
-        //float ip_poa_radians = (float)ip_poa_signed / (float)(1<<11); //we'll do this in python
-
-
         //read in the cir data
         uint16_t fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
-        CirDebugPacket final_cirdebug = CirDebugPacket();
-        final_cirdebug.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
 
-        final_cirdebug.set_poa(ip_poa);
-        final_cirdebug.set_acc_offset(fp_index);
-        final_cirdebug.set_carrier_integrator(radio->dwt_readcarrierintegrator());
+        uint8_t cir_buffer[6 + 1] = {}; //1 complex value and 1 dummy byte
+        radio->dwt_readaccdata(cir_buffer, 7, fp_index + 1); //reading at fp_index + 1 to get the highest point in the first path peak
+
 
         //calculate final packet outgoing time
+        auto rx_timestamp = radio->get_rx_timestamp_u64();
         auto final_tx_timestamp = set_outgoing_time(TURNAROUND_TIME_US, radio->get_rx_timestamp_u64());
         auto held_time = final_tx_timestamp - poll_tx_timestamp;
-        final_cirdebug.set_held_time((uint32_t)held_time);
+
+        //bundle all this into a RangingPacket
+        auto final_ranging = RangingPacket(rx_timestamp, held_time, RangingFrameNum::Final, 0, cir_buffer + 1);
 
         auto final_packet = UWBPacket(
             get_uuid(),
             UWBPacket::BROADCAST_MAC,
             PacketType::Ranging,
-            final_cirdebug.get_compiled(),
-            final_cirdebug.get_compiled_len()
+            final_ranging.get_compiled(),
+            final_ranging.get_compiled_len()
         );
 
 
@@ -753,6 +718,12 @@ void setup() {
 
     radio->dwt_setrxantennadelay(RX_ANT_DELAY);
 	radio->dwt_settxantennadelay(TX_ANT_DELAY);
+
+    //we may potentially use this later, but in order to do so, we need to set up our frames to comply with this standard
+    //DWT_FF_ENABLE_802_15_4
+    //radio->dwt_configureframefilter()
+    //radio->dwt_setpanid();
+    //radio->dwt_setaddress16();
 
     Serial.println("Ready");
 }
