@@ -352,7 +352,7 @@ void loop_initiator() {
 
         //calculate final packet outgoing time
         auto rx_timestamp = radio->get_rx_timestamp_u64();
-        auto final_tx_timestamp = set_outgoing_time(TURNAROUND_TIME_US, radio->get_rx_timestamp_u64());
+        auto final_tx_timestamp = set_outgoing_time(TURNAROUND_TIME_US, rx_timestamp);
         auto held_time = final_tx_timestamp - poll_tx_timestamp;
 
         //bundle all this into a RangingPacket
@@ -370,35 +370,7 @@ void loop_initiator() {
         //send final A
         if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
 
-            radio->clear_system_status();
-
-            //send post-final B
-            set_outgoing_time(TURNAROUND_TIME_US, radio->get_tx_timestamp_u64());
-            if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
-                radio->clear_system_status();
-
-                //send post-post-POST final (wow) C
-                set_outgoing_time(TURNAROUND_TIME_US + 3000, radio->get_tx_timestamp_u64());
-                if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
-
-                    //send pppf D
-                    set_outgoing_time(TURNAROUND_TIME_US + 2200, radio->get_tx_timestamp_u64());
-                    if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
-    
-                        digitalWrite(LED_D9, false);
-    
-                    } else {
-                        Serial.println("Send P3-Final Error");
-                    }
-
-
-                } else {
-                    Serial.println("Send Post-post-Final Error");
-                }
-            } else {
-                Serial.println("Send Post-Final Error");
-            }
-
+            //do nothing for now
 
         } else {
             Serial.println("Send Final Error");
@@ -438,28 +410,26 @@ void loop_responder() {
         
         digitalWrite(LED_D9, false); //LED on 
 
-        auto poll_rx_timestamp = radio->get_rx_timestamp_u64();
-        auto poll_packet = get_packet();
-        auto poll_cirdebug = CirDebugPacket(poll_packet.get_payload());
-
-
         radio->clear_system_status();
 
-        //todo: I'd rather read this direct
-        //dwt_rxdiag_t diagnostics = {};
-        //radio->dwt_readdiagnostics(&diagnostics);
+        auto poll_rx_timestamp = radio->get_rx_timestamp_u64();
+        auto poll_raw_packet = get_packet();
+        auto poll_packet = RangingPacket(poll_raw_packet.get_payload());
 
-        //1:1 with the DW1000 version
-        //raw register: IP_DIAG_8.IP_FP
-        //uint16_t fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
+        uint8_t cir_buffer[6 + 1] = {}; //1 complex value and 1 dummy byte
+        radio->dwt_readaccdata(cir_buffer, 7, fp_index + 1); //reading at fp_index + 1 to get the highest point in the first path peak
 
 
-        //populate outgoing packet with data (not really needed; the other radio doesn't read this)
-        uint16_t fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
-        CirDebugPacket poll_gleaned_info = CirDebugPacket();
-        poll_gleaned_info.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
-        poll_gleaned_info.set_carrier_integrator(radio->dwt_readcarrierintegrator()); //store carrier integrator for reverse compensation later
-        poll_gleaned_info.set_poa(radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1)); //store the phase of arrival too
+
+
+        //calculate final packet outgoing time
+        auto response_tx_timestamp = set_outgoing_time(TURNAROUND_TIME_US, poll_rx_timestamp);
+        auto held_time = response_tx_timestamp - poll_rx_timestamp;
+
+        //bundle all this into a RangingPacket
+        auto response_ranging = RangingPacket(poll_rx_timestamp, held_time, RangingFrameNum::Response, 0, cir_buffer + 1);
+
+
 
 
         UWBPacket response_packet = UWBPacket(
