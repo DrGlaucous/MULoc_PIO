@@ -327,7 +327,7 @@ try:
                         final_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * final_ci
 
                         #the time between the two rx samples at the receiver
-                        sample_delay = (round_1_time + reply_2_time) * DWT_TIME_UNITS
+                        #sample_delay = (round_1_time + reply_2_time) * DWT_TIME_UNITS
                         sample_delay = 4e-3
                         wrap_factor = 1/(6489.6e6)/sample_delay*1e6
 
@@ -335,7 +335,13 @@ try:
                         ambiguity = math.floor((final_freq_offset_hz * HERTZ_TO_PPM_MULTIPLIER_CHAN_5) / wrap_factor)
                         #determine drift
 
+                        #drift_estimate = ((poll_phase - final_phase) / (2 * math.pi) + ambiguity) * wrap_factor
                         drift_estimate = ((final_phase - pfinal_phase) / (2 * math.pi) + ambiguity) * wrap_factor
+                        drift_estimate %= wrap_factor
+
+                        #when using poll and final instead of final and post-final, this is needed... I don't know why.
+                        #we also get pi phase shifting with it. Also don't know why.
+                        #drift_estimate /= 2
 
                         foffset3 = 2*math.pi*6489.6e6*drift_estimate*1e-6*sample_delay
 
@@ -355,14 +361,10 @@ try:
 
                         cancled_cir_1 = poll_phase + response_phase #found_phase_b_diff
                         cancled_cir_3 = poll_phase + response_phase - foffset3 #found_phase_b_diff
-
-                        cancled_cir_2 = cancled_cir_1 + cancled_cir_3
-
-
-
                         cancled_cir_1 = cancled_cir_1 % (2 * math.pi)
                         cancled_cir_3 = cancled_cir_3 % (2 * math.pi)
-                        cancled_cir_2 = cancled_cir_2 % (2 * math.pi)
+
+
 
               
 

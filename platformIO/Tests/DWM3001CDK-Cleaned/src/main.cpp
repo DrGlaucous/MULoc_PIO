@@ -266,59 +266,48 @@ void print_cir_packet(const CirDebugPacket& packet) {
     }
 }
 
-////////////////////main methods
 
-//just blasts packets. How fast can we go?
-bool freq_flipper = false;
-void loop_test() {
+//a data object to help with each round of ranging (ch. 5 vs ch. 9)
+class TelemetryHolder{
+    public:
 
-    auto tick = micros();
+    float poll_phase = 0.0;
+    float response_phase = 0.0;
+    float final_phase = 0.0;
+    float pfinal_phase = 0.0;
+    int32_t final_ci = 0.0;
+    int32_t pfinal_ci = 0.0;
+    uint64_t round1_time = 0;
+    uint64_t reply1_time = 0;
+    uint64_t round2_time = 0;
+    uint64_t reply2_time = 0;
 
-    auto outgoing = "Hello";
-    //wrap outgoing_tr_packet in a main packet
-    UWBPacket outgoing_main = UWBPacket(
-        get_uuid(),
-        UWBPacket::BROADCAST_MAC,
-        PacketType::UserDefined,
-        (uint8_t*)outgoing,
-        sizeof(outgoing)
-    );
+    void print() {
 
-    auto midpoint = micros();
+        Serial.print(poll_phase);
+        Serial.print(",");
+        Serial.print(response_phase);
+        Serial.print(",");
+        Serial.print(final_phase);
+        Serial.print(",");
+        Serial.print(pfinal_phase);
+        Serial.print(",");   
+        Serial.print(final_ci);
+        Serial.print(",");
+        Serial.print(pfinal_ci);
+        Serial.print(",");
+        print_u64(round1_time, 10);
+        Serial.print(",");
+        print_u64(reply1_time, 10);
+        Serial.print(",");
+        print_u64(round2_time, 10);
+        Serial.print(",");
+        print_u64(reply2_time, 10);
+    }
+};
 
-    //send message and immediately start waiting for response (non-blocking)
-    send_packet(outgoing_main, DWT_START_TX_IMMEDIATE);
-
-    auto first_half = midpoint - tick;
-    auto total = micros() - tick;
-    Serial.print(first_half);
-    Serial.print(" ");
-    Serial.println(total);
-
-    set_channel_config(freq_flipper);
-    freq_flipper = !freq_flipper;
-    //delay(1000);
-
-
-}
-
-
-
-bool is_freq_5 = true;
-
-//tag
-void loop_initiator() {
-    //start with clean slate
-    radio->clear_system_status();
-    radio->dwt_forcetrxoff();
-
-    //ensure frequency is set correctly
-    set_channel_config(is_freq_5);
-
-    //1000 microseconds * 1000, should be 1 second
-    radio->dwt_setrxtimeout(UUS_TO_DWT_TIME * 1000000u);
-
-    digitalWrite(LED_D9, false); //LED on 
+//all the duplicate method things inside loop_initiator between ch.5 and ch.9
+bool ranging_initiator() {
 
     //kick off poll
     auto poll_ranging = RangingPacket(0, 0, RangingFrameNum::Request, 0);
@@ -389,37 +378,28 @@ void loop_initiator() {
 
             if(send_packet(pfinal_packet, DWT_START_TX_DELAYED)) {
                 //do nothing
+                return true;
             } else {
                 Serial.println("Send PFinal Error");
+                return false;
             }
 
         } else {
             Serial.println("Send Final Error");
+            return false;
         }
 
     }
 
-    digitalWrite(LED_D9, true); //LED off
-    delay(200);
+    return false;
 
 }
 
 
-//base
-void loop_responder() {
-
-
-    //start with clean slate
-    radio->clear_system_status();
-
-    //ensure frequency is set to 5
-    set_channel_config(is_freq_5);
-
-    //1000 microseconds * 1000, should be 1 second
-    radio->dwt_setrxtimeout(UUS_TO_DWT_TIME * 1000000u);
-
+bool ranging_responder(TelemetryHolder& th) {
 
     radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
+
 
     //wait for response
     auto poll_status = 0;
@@ -545,46 +525,31 @@ void loop_responder() {
 
                         //output format: 
                         //[poll cir phase][response cir phase][final cir phase][final carrier integrator][round 1 time][reply 1 time][round 2 time][reply 2 time]
-                        Serial.println("A");
 
-
-                        Serial.print(poll_phase);
-                        Serial.print(",");
-                        Serial.print(response_phase);
-                        Serial.print(",");
-                        Serial.print(final_phase);
-                        Serial.print(",");
-                        Serial.print(pfinal_phase);
-                        Serial.print(",");   
-                        Serial.print(final_ci);
-                        Serial.print(",");
-                        Serial.print(pfinal_ci);
-                        Serial.print(",");
-                        print_u64(round1_time, 10);
-                        Serial.print(",");
-                        print_u64(reply1_time, 10);
-                        Serial.print(",");
-                        print_u64(round2_time, 10);
-                        Serial.print(",");
-                        print_u64(reply2_time, 10);
-
-
-                        Serial.println();
-
-
-                        Serial.println("B");
+                        th.poll_phase = poll_phase;
+                        th.response_phase = response_phase;
+                        th.final_phase = final_phase;
+                        th.pfinal_phase = pfinal_phase;
+                        th.final_ci = final_ci;
+                        th.pfinal_ci = pfinal_ci;
+                        th.round1_time = round1_time;
+                        th.reply1_time = reply1_time;
+                        th.round2_time = round2_time;
+                        th.reply2_time = reply2_time;
 
                     }
 
                 } else {
                     Serial.print("PF RX Error: ");
                     Serial.println(pfinal_status);
+                    return false;
                 }
 
 
             } else {
                 Serial.print("RX Error: ");
                 Serial.println(final_status);
+                return false;
             }
 
 
@@ -592,6 +557,7 @@ void loop_responder() {
 
         } else {
             Serial.print("TX Error");
+            return false;
         }
 
 
@@ -599,7 +565,126 @@ void loop_responder() {
     } else {
         Serial.print("RX error: ");
         Serial.println(poll_status);
+        return false;
     }
+
+    return true;
+
+
+}
+
+////////////////////main methods
+
+//just blasts packets. How fast can we go?
+bool freq_flipper = false;
+void loop_test() {
+
+    auto tick = micros();
+
+    auto outgoing = "Hello";
+    //wrap outgoing_tr_packet in a main packet
+    UWBPacket outgoing_main = UWBPacket(
+        get_uuid(),
+        UWBPacket::BROADCAST_MAC,
+        PacketType::UserDefined,
+        (uint8_t*)outgoing,
+        sizeof(outgoing)
+    );
+
+    auto midpoint = micros();
+
+    //send message and immediately start waiting for response (non-blocking)
+    send_packet(outgoing_main, DWT_START_TX_IMMEDIATE);
+
+    auto first_half = midpoint - tick;
+    auto total = micros() - tick;
+    Serial.print(first_half);
+    Serial.print(" ");
+    Serial.println(total);
+
+    set_channel_config(freq_flipper);
+    freq_flipper = !freq_flipper;
+    //delay(1000);
+
+
+}
+
+
+
+bool is_freq_5 = true;
+
+//tag
+void loop_initiator() {
+    //start with clean slate
+    radio->clear_system_status();
+    radio->dwt_forcetrxoff();
+
+    //ensure frequency is set correctly
+    set_channel_config(false);
+
+    //1000 microseconds * 1000, should be 1 second
+    radio->dwt_setrxtimeout(UUS_TO_DWT_TIME * 1000000u);
+
+    digitalWrite(LED_D9, false); //LED on 
+
+    if(!ranging_initiator()) {
+        //delay(1000);
+        return;
+    }
+
+    radio->clear_system_status();
+    radio->dwt_forcetrxoff();
+    set_channel_config(false);
+
+    //delay(200);
+    //ranging_initiator();
+
+
+    digitalWrite(LED_D9, true); //LED off
+    delay(200);
+
+}
+
+
+//base
+void loop_responder() {
+
+
+    //start with clean slate
+    radio->clear_system_status();
+
+    //ensure frequency is set to 5
+    set_channel_config(false);
+
+    //1000 microseconds * 1000, should be 1 second
+    radio->dwt_setrxtimeout(UUS_TO_DWT_TIME * 1000000u);
+
+    TelemetryHolder th_ch5 = TelemetryHolder();
+    TelemetryHolder th_ch9 = TelemetryHolder();
+
+    //wait for response
+    if(!ranging_responder(th_ch5)) {
+        Serial.println("AAA");
+        return;
+    }
+
+    //switch frequencies and do it again
+    //set_channel_config(false);
+    radio->clear_system_status();
+    //if(!ranging_responder(th_ch9)) {
+    //    Serial.println("BBB");
+    //    return;
+    //}
+
+    //print output
+
+    Serial.println("A");
+    th_ch5.print();
+    Serial.println("");
+    th_ch9.print();
+    Serial.println("");
+    Serial.println("B");
+
 
 
 }
