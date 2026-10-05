@@ -545,7 +545,7 @@ try:
                                         x_vals, response_cir[0], #tag phase
                                         #green, red, blue
                                         #drift_estimate_from_cfo, drift_estimate_from_clock, drift_estimate
-                                        cancled_cir_1, cancled_cir_2, cancled_cir_3
+                                        0, 0, cancled_cir_3
                                         )
 
 

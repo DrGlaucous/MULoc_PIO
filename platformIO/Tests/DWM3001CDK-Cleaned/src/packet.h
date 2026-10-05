@@ -90,10 +90,11 @@ class RangingPacket {
     public:
 
     //construct from individual components
-    //time_reply is the time we got the data in,
-    //time_round is how long we held on to the packet before sending it back,
+    //time_reply is the time from when we got a reply to when we send it out (see page 249 of the user manual)
+    //time_round is the time from when we first sent a packet to when we got a reply
     //frame_type is what flavor of frame is being sent
     //sequence_no is what number in the greater sequence order this packet is part of (I.E. each round of a token ring will have the same seq_no)
+    //complex_data is a pointer to a 6 byte array containing real and imaginary CIR info [3 bytes real][3 bytes img.]
     RangingPacket(
         uint64_t time_reply,
         uint64_t time_round,
@@ -156,7 +157,7 @@ class RangingPacket {
     }
 
 
-    //set the complex number
+    //set the complex number (can also take raw casted int32_t data)
     void set_complex(uint32_t real, uint32_t img) {
 
         //set reals
@@ -175,25 +176,52 @@ class RangingPacket {
 
     //set the complex number given a raw 6 byte char array with the format [real, 3 bytes][imaginary, 3 bytes]
     //this is the same format we get when we read it with dwt_readaccadata
-    void set_complex(uint8_t* raw_data) {
+    void set_complex(const uint8_t* raw_data) {
         memcpy(payload + COMPLEX_PHASE_ID, raw_data, 6);
     }
 
     //get the complex number
-    void get_complex(uint32_t* real, uint32_t* img) const {
-        if(real == nullptr || img == nullptr) {
+    void get_complex(int32_t* real, int32_t* img) const {
+
+        get_complex(payload + COMPLEX_PHASE_ID, real, img);
+
+        return;
+    }
+
+    //turn a 6 byte array into real and img parts, automatically performs sign extension
+    static void get_complex(const uint8_t* input_data, int32_t* real, int32_t* img)
+    {
+        if(real == nullptr || img == nullptr || input_data == nullptr) {
             return;
         }
 
-        *real = payload[COMPLEX_PHASE_ID + 0] << 0
-        | payload[COMPLEX_PHASE_ID + 1] << 8
-        | payload[COMPLEX_PHASE_ID + 2] << 16;
+        uint32_t raw_real = input_data[0] << 0
+        | input_data[1] << 8
+        | input_data[2] << 16;
 
-        *img = payload[COMPLEX_PHASE_ID + 3] << 0
-        | payload[COMPLEX_PHASE_ID + 4] << 8
-        | payload[COMPLEX_PHASE_ID + 5] << 16;
+        uint32_t raw_img = input_data[3] << 0
+        | input_data[4] << 8
+        | input_data[5] << 16;
+
+        *real = u24_to_i32(raw_real);
+        *img = u24_to_i32(raw_img);
 
         return;
+    }
+
+
+    //sign extension helper
+    static int32_t u24_to_i32(uint32_t raw_24bit) {
+
+        //mask extra data
+        raw_24bit &= 0x00FFFFFF; 
+        
+        //check for the sign bit
+        if (raw_24bit & 0x00800000) {
+            raw_24bit |= 0xFF000000; //sign extend if needed
+        }
+
+        return (int32_t)raw_24bit;
     }
 
 

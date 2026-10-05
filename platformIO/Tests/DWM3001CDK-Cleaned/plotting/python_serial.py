@@ -291,261 +291,88 @@ try:
                         #print(len(chunk))
                         ascii_string = bytes(chunk).decode("ascii")
 
-
+                        #split into rows
                         parts = re.split(r'\n', ascii_string)
-                        poll_cir = ([],[])
-                        response_cir = ([],[])
-                        final_cir = ([],[])
-                        post_final_cir = ([],[])
-                        post_post_final_cir = ([],[])
-                        p3f_cir = ([],[])
 
-                        try:
-                            poll_cir = parse_cir_line(parts[1])
-                            response_cir = parse_cir_line(parts[2])
-                            final_cir = parse_cir_line(parts[3])
-                            post_final_cir = parse_cir_line(parts[4])
-                            post_post_final_cir = parse_cir_line(parts[5])
-                            p3f_cir = parse_cir_line(parts[6])
-                        except:
-                            break
+                        #split into cols (first column is 'A')
+                        numbers = re.split(r',', parts[1])
+
+                        if(len(numbers) < 8):
+                            continue
+
+                        poll_phase = float(numbers[0])
+                        response_phase = float(numbers[1])
+                        final_phase = float(numbers[2])
+                        pfinal_phase = float(numbers[3])
+                        final_ci = float(numbers[4])
+                        pfinal_ci = float(numbers[5])
+                        round_1_time = float(numbers[6])
+                        reply_1_time = float(numbers[7])
+                        round_2_time = float(numbers[8])
+                        reply_2_time = float(numbers[9])
 
 
 
 
-                        # #this method is not supposed to handle this, but we're doing it anyways
-                        carrier_integrators = parse_cir_line(parts[7])
-                        poll_ci = carrier_integrators[0][0]
-                        final_ci = carrier_integrators[1][0]
-                        post_final_ci = carrier_integrators[0][1]
-                        post_post_final_ci = carrier_integrators[1][1]
-                        remote_held_time = carrier_integrators[0][2]
-                        local_held_time = carrier_integrators[1][2]
 
 
                         #constants pulled from the qorvo API
                         FREQ_OFFSET_MULTIPLIER = (998.4e6 / 2.0 / 1024.0 / 131072.0)
                         HERTZ_TO_PPM_MULTIPLIER_CHAN_5 = (-1.0e6 / 6489.6e6)
-
-                        #equivalent units to the cfo variable in the muloc code (may need to be multiplied by -1)
-                        poll_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * poll_ci
-                        final_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * final_ci
-                        post_final_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * post_final_ci
-                        post_post_final_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * post_post_final_ci
-
-                        poll_rotations_per_sample = 2 * math.pi * poll_freq_offset_hz * (1. / 499.22e6)
-                        final_rotations_per_sample = 2 * math.pi * final_freq_offset_hz * (1. / 499.22e6)
-                        post_final_rotations_per_sample = 2 * math.pi * post_final_freq_offset_hz * (1. / 499.22e6)
-                        post_post_final_rotations_per_sample = 2 * math.pi * post_post_final_freq_offset_hz * (1. / 499.22e6)
-
-                        drift_estimate_from_cfo = (post_final_freq_offset_hz * HERTZ_TO_PPM_MULTIPLIER_CHAN_5)
-                        #foffset = 2*math.pi*post_final_freq_offset_hz*8000e-6
-                        #foffset = 2*math.pi*6489.6e6*drift_estimate_from_cfo*1e-6*8000e-6
-                        foffset = -2*math.pi*post_final_freq_offset_hz*8000e-6
-
-                        
-                        clock_offset = (remote_held_time - local_held_time) / local_held_time                        
-                        freq_offset = 6489.6e6 * clock_offset
-                        drift_estimate_from_clock = freq_offset * HERTZ_TO_PPM_MULTIPLIER_CHAN_5
-                        foffset2 = -2*math.pi*freq_offset*8000e-6
-                        #foffset2 = 2*math.pi*6489.6e6*drift_estimate_from_clock*1e-6*8000e-6
-
-
-
+                        DWT_TIME_UNITS = (1.0 / 499.2e6 / 128.0) #15.65e-12s per tick of the radio
 
 
                         #new experiment: residue cancellation using phase values
-                        wrap_factor = 1/(6489.6e6)/8e-3*1e6
+
+                        final_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * final_ci
+
+                        #the time between the two rx samples at the receiver
+                        sample_delay = (round_1_time + reply_2_time) * DWT_TIME_UNITS
+                        sample_delay = 4e-3
+                        wrap_factor = 1/(6489.6e6)/sample_delay*1e6
 
                         #determine ambiguity
                         ambiguity = math.floor((final_freq_offset_hz * HERTZ_TO_PPM_MULTIPLIER_CHAN_5) / wrap_factor)
                         #determine drift
 
-                        drift_estimate = ((final_cir[0][9] - post_final_cir[0][9]) / (2 * math.pi) + ambiguity) * wrap_factor
+                        drift_estimate = ((final_phase - pfinal_phase) / (2 * math.pi) + ambiguity) * wrap_factor
 
-                        foffset3 = 2*math.pi*6489.6e6*drift_estimate*1e-6*8000e-6
+                        foffset3 = 2*math.pi*6489.6e6*drift_estimate*1e-6*sample_delay
 
-                        print(f"Foffset: {foffset:.2f}\t|| Foffset2: {foffset2:.4f}\t|| foffset3: {foffset3}")
-
-
-                        # #read in carrier integrators and first path index values
-                        # anchor_ci = carrier_integrators[0][0]
-                        # tag_ci = carrier_integrators[1][0]
-                        # anchor2_ci = carrier_integrators[0][1]
-                        # #fp_index - 8 is where we start reading our samples
-                        # tag_fp_index = carrier_integrators[1][1] - 8
-                        # anchor_fp_index = carrier_integrators[0][2] - 8
-                        # anchor2_fp_index = carrier_integrators[1][2] - 8
-                        # #phase of arrival
-                        # ip_poa_anchor = float(carrier_integrators[0][3]) / float(1 << 11)
-                        # ip_poa_tag = float(carrier_integrators[1][3]) / float(1 << 11)
-                        # #calculate rotations per sample for de-rotating them.
-                        # #frequency = 6489.6e6
-                        # tag_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * tag_ci
-                        # anchor_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * anchor_ci
-                        # anchor2_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * anchor2_ci
-                        # #offset_ratio = tag_second_ci * FREQ_OFFSET_MULTIPLIER * HERTZ_TO_PPM_MULTIPLIER_CHAN_5# / 1e6
-                        # tag_rotation_per_sample = 2 * math.pi * tag_freq_offset_hz * (1. / 499.22e6)
-                        # anchor_rotation_per_sample = 2 * math.pi * anchor_freq_offset_hz * (1. / 499.22e6)
-                        # anchor2_rotation_per_sample = 2 * math.pi * anchor2_freq_offset_hz * (1. / 499.22e6)
-
-
-                        #phase wrap and de-rotate
-                        for i in range(len(poll_cir[0])):
-
-                            #anchor_cir[0][i] = anchor_cir[0][i] - ip_poa_anchor 
-                            #tag_cir[0][i] = tag_cir[0][i] - ip_poa_tag
-                            #anchor_cir[0][i] = anchor_cir[0][i] - (anchor_fp_index + i) * anchor_rotation_per_sample
-                            #tag_cir[0][i] = tag_cir[0][i] - (tag_fp_index + i) * tag_rotation_per_sample
-                            #post_final_cir[0][i] = post_final_cir[0][i] - (anchor2_fp_index + i) * anchor2_rotation_per_sample
-
-
-                            if(poll_cir[0][i] < 0):
-                                poll_cir[0][i] += 2 * math.pi
-                            if(response_cir[0][i] < 0):
-                                response_cir[0][i] += 2 * math.pi
-                            if(final_cir[0][i] < 0):
-                                final_cir[0][i] += 2 * math.pi
-                            if(post_final_cir[0][i] < 0):
-                                post_final_cir[0][i] += 2 * math.pi
-                            if(post_post_final_cir[0][i] < 0):
-                                post_post_final_cir[0][i] += 2 * math.pi
-
-
-                        #unfortunately, this doesn't have the accuracy needed to reliably cancel our residual
-                        phase_a = final_cir[0][9]
-                        phase_b = post_final_cir[0][9] #ground truth
-                        phase_c = post_post_final_cir[0][9]
-                        phase_d = p3f_cir[0][9]
-
-                        a_b_time = 8000
-                        a_c_time = 19000
-                        c_d_time = 10200
-                        a_d_time = a_c_time + c_d_time
-
-                        b_c_time = a_c_time - a_b_time
-                        b_d_time = a_d_time - a_b_time
-
-                        a_c_percent = a_b_time / b_c_time
-                        a_d_percent = a_b_time / b_d_time
-
-                        #b_1 = (phase_a + a_c_percent * phase_c) / 1#(1 + a_c_percent)
-                        #b_2 = (phase_a - a_c_percent * phase_c) / 1#(1 - a_c_percent)
-
-                        #mathematical shortcut for a phase time of 0.5. Need to generalize it over any ratio
-                        b_1 = (phase_a - phase_c) * (a_b_time / a_c_time)
-                        b_2 = b_1 + math.pi
-                        b_1 = b_1 % (2 * math.pi)
-                        b_2 = b_2 % (2 * math.pi)
-
-                        #either b1 or b2 will be the correct answer at this point, but new need to figure out which one to pick using only phase_d
-                        b_3 = (phase_a - phase_d) * (a_b_time / a_d_time)
-                        b_4 = b_3 + math.pi
-                        b_3 = b_3 % (2 * math.pi)
-                        b_4 = b_4 % (2 * math.pi)
-
-                        b_5 = (phase_c - phase_d) * (a_b_time / c_d_time)
-                        b_6 = b_5 + math.pi
-                        b_5 = b_5 % (2 * math.pi)
-                        b_6 = b_6 % (2 * math.pi)
-
-                        #of the four points calculated above, find the two that are closest together (those should be the correct offset)
-                        def shortest_angular_distance(angle_1: float, angle_2: float) -> float:
-                            return abs((angle_1 - angle_2 + math.pi) % (2 * math.pi) - math.pi)
-
-                        sha_dis_1 = shortest_angular_distance(b_1, b_3)
-                        sha_dis_2 = a_d_percent * shortest_angular_distance(b_1, b_4)
-
-                        sha_dis_3 = shortest_angular_distance(b_2, b_3)
-                        sha_dis_4 = a_d_percent * shortest_angular_distance(b_2, b_4)
-
-                        sha_dis_5 = a_d_percent * shortest_angular_distance(b_2, b_4)
-                        sha_dis_6 = a_d_percent * shortest_angular_distance(b_2, b_4)
-
-                        sha_dis_list = [sha_dis_1, sha_dis_2, sha_dis_3, sha_dis_4]
-                        shortest_dist = min(sha_dis_list)
-
-                        #draw a conclusion from the point we found
-                        found_phase_b_diff = 0.0
-                        if(shortest_dist == sha_dis_1):
-                            found_phase_b_diff = (b_1 + b_3) * 0.5
-                            ...
-                        elif(shortest_dist == sha_dis_2):
-                            found_phase_b_diff = (b_1 + b_4) * 0.5
-                            ...
-                        elif(shortest_dist == sha_dis_3):
-                            found_phase_b_diff = (b_2 + b_3) * 0.5
-                            ...
-                        else:
-                            found_phase_b_diff = (b_2 + b_4) * 0.5
-                            ...
-
-                        #difference between these two values is around 0 or around 2pi (0)
-                        subs1 = (phase_a - phase_b) % (2 * math.pi)
-                        subs2 = (phase_b - phase_c) % (2 * math.pi)
-
-                        subsbig = b_1 #(phase_a - phase_c) % (2 * math.pi)
-
-                        phase_cancellation_diff = (subs1 - subs2)
-                        #print(f"Subs1: {subs1:.2f}\t|| subs2: {subs2:.4f}\t|| subsbig: {subsbig:.4f}")
-
-                        #subs2 = 0
+                        print(f"foffset3: {foffset3}")
 
 
 
 
+                        #phase wrap
+                        if(poll_phase < 0):
+                            poll_phase += 2 * math.pi
+                        if(response_phase < 0):
+                            response_phase += 2 * math.pi
+                        if(final_phase < 0):
+                            final_phase += 2 * math.pi
 
 
+                        cancled_cir_1 = poll_phase + response_phase #found_phase_b_diff
+                        cancled_cir_3 = poll_phase + response_phase - foffset3 #found_phase_b_diff
 
-                        #I think I can use collect to make this go faster... oh, well.
-                        x_vals: list[float] = []
-                        for i in range(len(poll_cir[0])):
-                            x_vals.append(float(i))
-
-                        cancled_cir_1 = poll_cir[0][9] + response_cir[0][9] - foffset #(final_cir[0][9] - post_final_cir[0][9])
-                        cancled_cir_2 = poll_cir[0][9] + response_cir[0][9] - foffset2 #(post_final_cir[0][9] - post_post_final_cir[0][9])
-                        cancled_cir_3 = poll_cir[0][9] + response_cir[0][9] - foffset3 #found_phase_b_diff
+                        cancled_cir_2 = cancled_cir_1 + cancled_cir_3
 
 
-                        #cancled_cir2 = anchor_cir[0][9] - tag_cir[0][9] + post_final_cir[0][9]
-                        #cancled_cir2 = cancled_cir2 % (2 * math.pi)
-
-                        #the version in the paper varies by about 0.6 radians
 
                         cancled_cir_1 = cancled_cir_1 % (2 * math.pi)
-                        cancled_cir_2 = cancled_cir_2 % (2 * math.pi)
                         cancled_cir_3 = cancled_cir_3 % (2 * math.pi)
+                        cancled_cir_2 = cancled_cir_2 % (2 * math.pi)
 
-                        #cancled_cir = moving_average(cancled_cir)
+              
 
-                        #last_inverted_cir = (last_canceled_cir + math.pi) % (2 * math.pi)
-                        #last_canceled_cir = cancled_cir
-
-                        #submitted_cir = cancled_cir
-                        #if(abs(cancled_cir - last_inverted_cir) < 0.6):
-                        #    submitted_cir = (cancled_cir + math.pi) % (2 * math.pi)
-                        
-
-
-
-                        
-
-                        #test: offset by 1/2 a phase if this happens
-                        #if(delta_cir > math.pi * 0.5 and delta_cir < math.pi * 0.5):
-                        #    cancled_cir += math.pi
-                        #    cancled_cir = cancled_cir % (2 * math.pi)
-
-
-
-                        
-
-                        update_plot_data(x_vals, poll_cir[1], #anchor mag
-                                        x_vals, response_cir[1], #tag mag
-                                        x_vals, poll_cir[0], #anchor phase
-                                        x_vals, response_cir[0], #tag phase
+                        update_plot_data([0], [0], #anchor mag
+                                        [0], [0], #tag mag
+                                        [0], [0], #anchor phase
+                                        [0], [0], #tag phase
                                         #green, red, blue
                                         #drift_estimate_from_cfo, drift_estimate_from_clock, drift_estimate
-                                        cancled_cir_1, cancled_cir_2, cancled_cir_3
+                                        cancled_cir_1, 0, cancled_cir_3
                                         )
 
 

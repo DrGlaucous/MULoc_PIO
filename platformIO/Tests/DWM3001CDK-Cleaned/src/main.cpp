@@ -77,8 +77,10 @@ uint64_t get_uuid() {
 }
 
 //prints a u64, since the arduino IDE's serial.print doesn't handle this
-void print_u64(uint64_t value, int base) {
-	Serial.print((uint32_t)(value >> 32), base);
+void print_u64(uint64_t value, int base) {    
+    if((value >> 32) > 0) {
+    	Serial.print((uint32_t)(value >> 32), base);
+    }
 	Serial.print((uint32_t)(value & 0xFFFFFFFF), base);
 }
 
@@ -351,12 +353,13 @@ void loop_initiator() {
 
 
         //calculate final packet outgoing time
-        auto rx_timestamp = radio->get_rx_timestamp_u64();
-        auto final_tx_timestamp = set_outgoing_time(TURNAROUND_TIME_US, rx_timestamp);
-        auto held_time = final_tx_timestamp - poll_tx_timestamp;
+        uint64_t rx_timestamp = radio->get_rx_timestamp_u64();
+        uint64_t final_tx_timestamp = set_outgoing_time(TURNAROUND_TIME_US, rx_timestamp);
+        uint64_t round1_time = rx_timestamp - poll_tx_timestamp;
+        uint64_t reply2_time = final_tx_timestamp - rx_timestamp;
 
         //bundle all this into a RangingPacket
-        auto final_ranging = RangingPacket(rx_timestamp, held_time, RangingFrameNum::Final, 0, cir_buffer + 1);
+        auto final_ranging = RangingPacket(reply2_time, round1_time, RangingFrameNum::Final, 0, cir_buffer + 1);
 
         auto final_packet = UWBPacket(
             get_uuid(),
@@ -370,7 +373,25 @@ void loop_initiator() {
         //send final A
         if(send_packet(final_packet, DWT_START_TX_DELAYED)) {
 
-            //do nothing for now
+            //send post-final packet
+
+            uint64_t p_final_tx_timestamp = set_outgoing_time(TURNAROUND_TIME_US, final_tx_timestamp);
+            uint64_t reply2_2_time = p_final_tx_timestamp - rx_timestamp; //a second reply2 timespan, completely optional
+
+            auto pfinal_ranging = RangingPacket(reply2_2_time, round1_time, RangingFrameNum::Final, 0, cir_buffer + 1);
+            auto pfinal_packet = UWBPacket(
+                get_uuid(),
+                UWBPacket::BROADCAST_MAC,
+                PacketType::Ranging,
+                pfinal_ranging.get_compiled(),
+                pfinal_ranging.get_compiled_len()
+            );
+
+            if(send_packet(pfinal_packet, DWT_START_TX_DELAYED)) {
+                //do nothing
+            } else {
+                Serial.println("Send PFinal Error");
+            }
 
         } else {
             Serial.println("Send Final Error");
@@ -416,9 +437,12 @@ void loop_responder() {
         auto poll_raw_packet = get_packet();
         auto poll_packet = RangingPacket(poll_raw_packet.get_payload());
 
+        //get CIR info from the poll
+        uint16_t fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
         uint8_t cir_buffer[6 + 1] = {}; //1 complex value and 1 dummy byte
         radio->dwt_readaccdata(cir_buffer, 7, fp_index + 1); //reading at fp_index + 1 to get the highest point in the first path peak
 
+        auto poll_ci = radio->dwt_readcarrierintegrator();
 
 
 
@@ -427,23 +451,19 @@ void loop_responder() {
         auto held_time = response_tx_timestamp - poll_rx_timestamp;
 
         //bundle all this into a RangingPacket
-        auto response_ranging = RangingPacket(poll_rx_timestamp, held_time, RangingFrameNum::Response, 0, cir_buffer + 1);
+        auto response_packet = RangingPacket(poll_rx_timestamp, held_time, RangingFrameNum::Response, 0, cir_buffer + 1);
 
 
-
-
-        UWBPacket response_packet = UWBPacket(
+        UWBPacket response_raw_packet = UWBPacket(
             get_uuid(),
             UWBPacket::BROADCAST_MAC,
             PacketType::Ranging,
-            poll_gleaned_info.get_compiled(),
-            poll_gleaned_info.get_compiled_len()
+            response_packet.get_compiled(),
+            response_packet.get_compiled_len()
         );
 
-        set_outgoing_time(TURNAROUND_TIME_US, radio->get_rx_timestamp_u64());
 
-
-        if(send_packet(response_packet, DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED)) {
+        if(send_packet(response_raw_packet, DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED)) {
 
             radio->clear_system_status();
 
@@ -452,152 +472,113 @@ void loop_responder() {
                 final_status = clone_check_for_rx();
             } while(final_status == 0);
 
+
             if(final_status == 1) {
-                
+
                 radio->clear_system_status();
                 
                 //save the response CIR data
                 auto final_rx_timestamp = radio->get_rx_timestamp_u64();
-                auto final_packet = get_packet();
-                auto response_gleaned_info = CirDebugPacket(final_packet.get_payload());
+                auto final_raw_packet = get_packet();
+                auto final_packet = RangingPacket(final_raw_packet.get_payload());
 
-                //save the final CIR data
-                CirDebugPacket final_gleaned_info = CirDebugPacket();
-                fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
-                final_gleaned_info.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
-                final_gleaned_info.set_carrier_integrator(radio->dwt_readcarrierintegrator()); //store carrier integrator for reverse compensation later
-                final_gleaned_info.set_poa(radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1)); //store the phase of arrival too
-                
+                auto final_ci = radio->dwt_readcarrierintegrator();
+
+                //get CIR info from final
+                uint16_t fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
+                uint8_t cir_buffer2[6 + 1] = {}; //1 complex value and 1 dummy byte
+                radio->dwt_readaccdata(cir_buffer2, 7, fp_index + 1); //reading at fp_index + 1 to get the highest point in the first path peak
 
                 radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
-                auto post_final_status = 0;
+
+                //await post-final packet
+                auto pfinal_status = 0;
                 do {
-                    post_final_status = clone_check_for_rx();
-                } while(post_final_status == 0);
+                    pfinal_status = clone_check_for_rx();
+                } while(pfinal_status == 0);
 
-                if(post_final_status == 1) {
-
-                    radio->clear_system_status();
-
-
-                    auto post_final_rx_timestamp = radio->get_rx_timestamp_u64();
-                    auto post_final_packet = get_packet();
-
-                    //save the post final CIR data
-                    CirDebugPacket post_final_cirdebug = CirDebugPacket();
-                    fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
-                    post_final_cirdebug.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
-                    post_final_cirdebug.set_carrier_integrator(radio->dwt_readcarrierintegrator()); //store carrier integrator for reverse compensation later
-                    post_final_cirdebug.set_poa(radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1)); //store the phase of arrival too
-                    
-
-                    radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
-                    auto post_post_final_status = 0;
-                    do {
-                        post_post_final_status = clone_check_for_rx();
-                    } while(post_post_final_status == 0);
-
-                    if(post_post_final_status == 1) {
+                if(pfinal_status == 1)
+                {
+                    //get CIR info from pfinal
+                    uint16_t fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
+                    uint8_t cir_buffer3[6 + 1] = {}; //1 complex value and 1 dummy byte
+                    radio->dwt_readaccdata(cir_buffer3, 7, fp_index + 1); //reading at fp_index + 1 to get the highest point in the first path peak
 
 
 
-                        radio->clear_system_status();
+                    //final data formatting and printing
+                    {
 
-                        
-                        //save the ppf CIR data
-                        CirDebugPacket post_post_final_cirdebug = CirDebugPacket();
-                        fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
-                        post_post_final_cirdebug.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
-                        post_post_final_cirdebug.set_carrier_integrator(radio->dwt_readcarrierintegrator()); //store carrier integrator for reverse compensation later
-                        post_post_final_cirdebug.set_poa(radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1)); //store the phase of arrival too
-
-
-                        radio->dwt_rxenable(DWT_START_RX_IMMEDIATE);
-                        auto p3f_status = 0;
-                        do {
-                            p3f_status = clone_check_for_rx();
-                        } while(p3f_status == 0);
-                        if(p3f_status == 1) {
-
-                            //save the pppf CIR data
-                            CirDebugPacket p3f_cirdebug = CirDebugPacket();
-                            fp_index = radio->dwt_read16bitoffsetreg(IP_DIAG_8_ID, 0) >> 6;
-                            p3f_cirdebug.read_acc_data(radio, fp_index - (CirDebugPacket::VALUE_COUNT / 2));
-                            p3f_cirdebug.set_carrier_integrator(radio->dwt_readcarrierintegrator()); //store carrier integrator for reverse compensation later
-                            p3f_cirdebug.set_poa(radio->dwt_read16bitoffsetreg(IP_TOA_HI_ID, 1)); //store the phase of arrival too
+                        //collect CIR data
+                        int32_t poll_cir_real = 0.0;
+                        int32_t poll_cir_img = 0.0;
+                        int32_t response_cir_real = 0.0;
+                        int32_t response_cir_img = 0.0;
+                        int32_t final_cir_real = 0.0;
+                        int32_t final_cir_img = 0.0;
+                        int32_t pfinal_cir_real = 0.0;
+                        int32_t pfinal_cir_img = 0.0;
 
 
+                        response_packet.get_complex(&poll_cir_real, &poll_cir_img);
+                        final_packet.get_complex(&response_cir_real, &response_cir_img);
+                        RangingPacket::get_complex(cir_buffer2 + 1, &final_cir_real, &final_cir_img);
+                        RangingPacket::get_complex(cir_buffer3 + 1, &pfinal_cir_real, &pfinal_cir_img);
 
-                            digitalWrite(LED_D9, true); //LED off 
-
-                            //held time by remote
-                            uint32_t remote_held_time = response_gleaned_info.held_time();
-                            //same time by local
-                            uint32_t local_held_time = final_rx_timestamp - poll_rx_timestamp;
-
-                            Serial.println("A");
-                            print_cir_packet(poll_gleaned_info);
-                            Serial.println();
-                            print_cir_packet(response_gleaned_info);
-                            Serial.println();
-                            print_cir_packet(final_gleaned_info);
-                            Serial.println();
-                            print_cir_packet(post_final_cirdebug);
-                            Serial.println();
-                            print_cir_packet(post_post_final_cirdebug);
-                            Serial.println();
-                            print_cir_packet(p3f_cirdebug);
+                        auto pfinal_ci = radio->dwt_readcarrierintegrator();
 
 
-                            Serial.println();
-                            Serial.print(poll_gleaned_info.get_carrier_integrator());
-                            Serial.print(",");
-                            Serial.print(final_gleaned_info.get_carrier_integrator());
-                            Serial.print(",");
+                        float poll_phase = atan2(poll_cir_img, poll_cir_real);
+                        float response_phase = atan2(response_cir_img, response_cir_real);
+                        float final_phase = atan2(final_cir_img, final_cir_real);
+                        float pfinal_phase = atan2(pfinal_cir_img, pfinal_cir_real);
 
-                            Serial.print(post_final_cirdebug.get_carrier_integrator());
-                            Serial.print(",");
-                            Serial.print(post_post_final_cirdebug.get_carrier_integrator());
-                            Serial.print(",");
-
-
-                            Serial.print(remote_held_time);
-                            Serial.print(",");
-                            Serial.print(local_held_time);
-                            // Serial.print(",");
-
-                            // Serial.print(fp_index_0);
-                            // Serial.print(",");
-                            // Serial.print(fp_index_1);
-                            // Serial.print(",");
-
-                            // Serial.print(ip_poa_signed);
-                            // Serial.print(",");
-                            // Serial.print(ip_poa_tag);
-
-
-                            Serial.println();
-                            Serial.println("B");
-
-
-                        }
+                        //calculate values for DSTWR
+                        uint64_t round1_time = final_packet.get_round_time();
+                        uint64_t reply2_time = final_packet.get_reply_time();
+                        uint64_t round2_time = final_rx_timestamp - response_tx_timestamp;
+                        uint64_t reply1_time = response_tx_timestamp - poll_rx_timestamp;
 
 
 
 
+
+                        //output format: 
+                        //[poll cir phase][response cir phase][final cir phase][final carrier integrator][round 1 time][reply 1 time][round 2 time][reply 2 time]
+                        Serial.println("A");
+
+
+                        Serial.print(poll_phase);
+                        Serial.print(",");
+                        Serial.print(response_phase);
+                        Serial.print(",");
+                        Serial.print(final_phase);
+                        Serial.print(",");
+                        Serial.print(pfinal_phase);
+                        Serial.print(",");   
+                        Serial.print(final_ci);
+                        Serial.print(",");
+                        Serial.print(pfinal_ci);
+                        Serial.print(",");
+                        print_u64(round1_time, 10);
+                        Serial.print(",");
+                        print_u64(reply1_time, 10);
+                        Serial.print(",");
+                        print_u64(round2_time, 10);
+                        Serial.print(",");
+                        print_u64(reply2_time, 10);
+
+
+                        Serial.println();
+
+
+                        Serial.println("B");
 
                     }
-                    else {
-                        Serial.print("PPFS Error: ");
-                        Serial.println(post_post_final_status);
-                    }
-
-
-
 
                 } else {
-                    Serial.print("RX Error: ");
-                    Serial.println(post_final_status);
+                    Serial.print("PF RX Error: ");
+                    Serial.println(pfinal_status);
                 }
 
 
@@ -605,6 +586,8 @@ void loop_responder() {
                 Serial.print("RX Error: ");
                 Serial.println(final_status);
             }
+
+
 
 
         } else {
