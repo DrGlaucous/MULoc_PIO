@@ -253,7 +253,7 @@ while False:
     time.sleep(0.1)
 
 
-com_port_name = "COM11"
+com_port_name = "COM17"
 try:
     #open the port with baud 460800
     with serial.Serial(com_port_name, 460800, timeout=1) as ser:
@@ -295,74 +295,170 @@ try:
                         parts = re.split(r'\n', ascii_string)
 
                         #split into cols (first column is 'A')
-                        numbers = re.split(r',', parts[1])
+                        numbers_ch5 = re.split(r',', parts[1])
+                        numbers_ch9 = re.split(r',', parts[2])
+                        
 
-                        if(len(numbers) < 8):
+
+                        if(len(numbers_ch5) < 8 or len(numbers_ch9) < 8):
                             continue
 
-                        poll_phase = float(numbers[0])
-                        response_phase = float(numbers[1])
-                        final_phase = float(numbers[2])
-                        pfinal_phase = float(numbers[3])
-                        final_ci = float(numbers[4])
-                        pfinal_ci = float(numbers[5])
-                        round_1_time = float(numbers[6])
-                        reply_1_time = float(numbers[7])
-                        round_2_time = float(numbers[8])
-                        reply_2_time = float(numbers[9])
+                        ########################CH5
+                        #phases of each communication burst
+                        ch5_poll_phase = float(numbers_ch5[0])
+                        ch5_response_phase = float(numbers_ch5[1])
+                        ch5_final_phase = float(numbers_ch5[2])
+                        ch5_pfinal_phase = float(numbers_ch5[3])
 
+                        #carrier integrators for doing part of drift cancellation, though we really only need one of these
+                        ch5_final_ci = float(numbers_ch5[4])
+                        ch5_pfinal_ci = float(numbers_ch5[5])
 
+                        #use these for basic DSTWR calculations
+                        ch5_round_1_time = float(numbers_ch5[6])
+                        ch5_reply_1_time = float(numbers_ch5[7])
+                        ch5_round_2_time = float(numbers_ch5[8])
+                        ch5_reply_2_time = float(numbers_ch5[9])
+
+                        ########################CH9
+                        #phases of each communication burst
+                        ch9_poll_phase = float(numbers_ch9[0])
+                        ch9_response_phase = float(numbers_ch9[1])
+                        ch9_final_phase = float(numbers_ch9[2])
+                        ch9_pfinal_phase = float(numbers_ch9[3])
+
+                        #carrier integrators for doing part of drift cancellation, though we really only need one of these
+                        ch9_final_ci = float(numbers_ch9[4])
+                        ch9_pfinal_ci = float(numbers_ch9[5])
+
+                        #use these for basic DSTWR calculations
+                        ch9_round_1_time = float(numbers_ch9[6])
+                        ch9_reply_1_time = float(numbers_ch9[7])
+                        ch9_round_2_time = float(numbers_ch9[8])
+                        ch9_reply_2_time = float(numbers_ch9[9])
 
 
 
 
                         #constants pulled from the qorvo API
                         FREQ_OFFSET_MULTIPLIER = (998.4e6 / 2.0 / 1024.0 / 131072.0)
+                        FREQ_CH5 = 6489.6e6
+                        FREQ_CH9 = 7987.2e6
                         HERTZ_TO_PPM_MULTIPLIER_CHAN_5 = (-1.0e6 / 6489.6e6)
+                        HERTZ_TO_PPM_MULTIPLIER_CHAN_9 = (-1.0e6 / 7987.2e6)
                         DWT_TIME_UNITS = (1.0 / 499.2e6 / 128.0) #15.65e-12s per tick of the radio
 
 
                         #new experiment: residue cancellation using phase values
 
-                        final_freq_offset_hz = FREQ_OFFSET_MULTIPLIER * final_ci
+                        #represents cfo_coarse in the matlab example
+                        ch5_cfo_coarse = FREQ_OFFSET_MULTIPLIER * ch5_final_ci * HERTZ_TO_PPM_MULTIPLIER_CHAN_5
 
                         #the time between the two rx samples at the receiver
                         #sample_delay = (round_1_time + reply_2_time) * DWT_TIME_UNITS
                         sample_delay = 4e-3
-                        wrap_factor = 1/(6489.6e6)/sample_delay*1e6
+
+                        wrap_factor = 1/(FREQ_CH5)/sample_delay*1e6
 
                         #determine ambiguity
-                        ambiguity = math.floor((final_freq_offset_hz * HERTZ_TO_PPM_MULTIPLIER_CHAN_5) / wrap_factor)
+                        ambiguity = math.floor(ch5_cfo_coarse / wrap_factor)
                         #determine drift
 
-                        #drift_estimate = ((poll_phase - final_phase) / (2 * math.pi) + ambiguity) * wrap_factor
-                        drift_estimate = ((final_phase - pfinal_phase) / (2 * math.pi) + ambiguity) * wrap_factor
-                        drift_estimate %= wrap_factor
+                        #drift_estimate = ((ch5_poll_phase - ch5_final_phase) / (2 * math.pi) + ambiguity) * wrap_factor
+                        drift_estimate = ((ch5_final_phase - ch5_pfinal_phase) / (2 * math.pi) + ambiguity) * wrap_factor
+                        #drift_estimate %= wrap_factor
 
                         #when using poll and final instead of final and post-final, this is needed... I don't know why.
                         #we also get pi phase shifting with it. Also don't know why.
                         #drift_estimate /= 2
 
-                        foffset3 = 2*math.pi*6489.6e6*drift_estimate*1e-6*sample_delay
+                        slow_drift_offset_ch5 = 2*math.pi*FREQ_CH5*drift_estimate*1e-6*sample_delay
 
-                        print(f"foffset3: {foffset3}")
+                        #print(f"slow_drift_offset_ch5: {slow_drift_offset_ch5}", end="\t")
+
+                        ########################################CFO_Coarse using both channels (a test)
+                        #sample_delay = 8e-3
+
+                        ch9_cfo_raw = FREQ_OFFSET_MULTIPLIER * ch9_final_ci * HERTZ_TO_PPM_MULTIPLIER_CHAN_9
+                        ch5_cfo_raw = FREQ_OFFSET_MULTIPLIER * ch5_final_ci * HERTZ_TO_PPM_MULTIPLIER_CHAN_5
+
+                        cfo_raw_average = (ch9_cfo_raw + ch5_cfo_raw) / 2 #not sure if we want to use the average for this, but we can...
+                        wrap_factor = 1/(FREQ_CH9-FREQ_CH5)/sample_delay*1e6
+
+                        phase_diff_ch5 = (ch5_final_phase - ch5_pfinal_phase)
+                        phase_diff_ch9 = (ch9_final_phase - ch9_pfinal_phase)
+                        phase_diff = phase_diff_ch9 - phase_diff_ch5
+
+                        ambiguity = math.floor(cfo_raw_average / wrap_factor)
+
+                        cfo_coarse = (phase_diff / (2 * math.pi) + ambiguity) * wrap_factor
+                        if(cfo_coarse - cfo_raw_average < wrap_factor / 2):
+                            cfo_coarse += wrap_factor
+                        if(cfo_coarse - cfo_raw_average > wrap_factor / 2):
+                            cfo_coarse -= wrap_factor                        
+                        #cfo_coarse %= wrap_factor
+
+                        slow_drift_offset_coarse = 2*math.pi*(FREQ_CH9-FREQ_CH5)*cfo_coarse*1e-6*sample_delay
+                        #print(f"slow_drift_offset_coarse: {slow_drift_offset_coarse}", end="\t")
+
+                        #########################################CFO_Fine with channel 9
+
+                        wrap_factor = 1/(FREQ_CH9)/sample_delay*1e6
+                        #phase_diff_ch9 = (ch9_final_phase - ch9_pfinal_phase)
+
+                        ambiguity = math.floor(cfo_coarse / wrap_factor)
+                        cfo_fine_ch9 = (phase_diff_ch9 / (2 * math.pi) + ambiguity) * wrap_factor
+                        if(cfo_fine_ch9 - cfo_coarse < wrap_factor / 2):
+                            cfo_fine_ch9 += wrap_factor
+                        if(cfo_fine_ch9 - cfo_coarse > wrap_factor / 2):
+                            cfo_fine_ch9 -= wrap_factor
+                        #cfo_fine_ch9 %= wrap_factor
+
+                        slow_drift_offset_fine9 = 2*math.pi*(FREQ_CH9)*cfo_fine_ch9*1e-6*sample_delay
+                        #print(f"slow_drift_offset_fine9: {slow_drift_offset_fine9}")
+
+
+                        #########################################CFO_Fine with channel 5
+
+
+                        wrap_factor = 1/(FREQ_CH5)/sample_delay*1e6
+                        #phase_diff_ch5 = (ch5_final_phase - ch5_pfinal_phase)
+
+                        ambiguity = math.floor(cfo_coarse / wrap_factor)
+                        cfo_fine_ch5 = (phase_diff_ch5 / (2 * math.pi) + ambiguity) * wrap_factor
+                        if(cfo_fine_ch5 - cfo_coarse < wrap_factor / 2):
+                            cfo_fine_ch5 += wrap_factor
+                        if(cfo_fine_ch5 - cfo_coarse > wrap_factor / 2):
+                            cfo_fine_ch5 -= wrap_factor
+                        #cfo_fine_ch5 %= wrap_factor
+
+                        slow_drift_offset_fine5 = 2*math.pi*(FREQ_CH5)*cfo_fine_ch5*1e-6*sample_delay
+                        #print(f"slow_drift_offset_fine5: {slow_drift_offset_fine5}")
+
+                        #print(f"cfo_raw_average: {cfo_raw_average}")
+
+                        cfo_fine_av = (cfo_fine_ch5 + cfo_fine_ch9) / 2
+                        cfo_fine_av %= (2 * math.pi)
+
 
 
 
 
                         #phase wrap
-                        if(poll_phase < 0):
-                            poll_phase += 2 * math.pi
-                        if(response_phase < 0):
-                            response_phase += 2 * math.pi
-                        if(final_phase < 0):
-                            final_phase += 2 * math.pi
+                        if(ch5_poll_phase < 0):
+                            ch5_poll_phase += 2 * math.pi
+                        if(ch5_response_phase < 0):
+                            ch5_response_phase += 2 * math.pi
+                        if(ch5_final_phase < 0):
+                            ch5_final_phase += 2 * math.pi
 
 
-                        cancled_cir_1 = poll_phase + response_phase #found_phase_b_diff
-                        cancled_cir_3 = poll_phase + response_phase - foffset3 #found_phase_b_diff
-                        cancled_cir_1 = cancled_cir_1 % (2 * math.pi)
-                        cancled_cir_3 = cancled_cir_3 % (2 * math.pi)
+                        canceled_cir_1 = ch5_poll_phase + ch5_response_phase - slow_drift_offset_ch5 #found_phase_b_diff
+                        canceled_cir_2 = ch5_poll_phase + ch5_response_phase - slow_drift_offset_fine9
+                        canceled_cir_3 = ch5_poll_phase + ch5_response_phase - slow_drift_offset_fine5 #found_phase_b_diff
+                        canceled_cir_1 = canceled_cir_1 % (2 * math.pi)
+                        canceled_cir_2 = canceled_cir_2 % (2 * math.pi)
+                        canceled_cir_3 = canceled_cir_3 % (2 * math.pi)
 
 
 
@@ -374,7 +470,7 @@ try:
                                         [0], [0], #tag phase
                                         #green, red, blue
                                         #drift_estimate_from_cfo, drift_estimate_from_clock, drift_estimate
-                                        cancled_cir_1, 0, cancled_cir_3
+                                        canceled_cir_3,0,canceled_cir_1
                                         )
 
 

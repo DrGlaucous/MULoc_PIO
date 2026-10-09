@@ -21,8 +21,8 @@ static const dwt_config_t config_ch5 = {
     5,                		/* Channel number. */
     DWT_PLEN_64,     		/* Preamble length. Used in TX only. */
     DWT_PAC8,         		/* Preamble acquisition chunk size. Used in RX only. */
-    9,                		/* TX preamble code. Used in TX only. */
-    9,                		/* RX preamble code. Used in RX only. */
+    11,                		/* TX preamble code. Used in TX only. */
+    11,                		/* RX preamble code. Used in RX only. */
     1,                		/* 0 to use standard 8 symbol SFD, 1 to use non-standard 8 symbol, 2 for non-standard 16 symbol SFD and 3 for 4z 8 symbol SDF type */
     DWT_BR_6M8,       		/* Data rate. */
     DWT_PHRMODE_STD,  		/* PHY header mode. */

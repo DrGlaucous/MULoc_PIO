@@ -7,7 +7,7 @@ void setup()
 {
 	//initial setup
 	Serial.begin(BAUD_RATE);
-	Serial2.begin(BAUD_RATE, SERIAL_8N1, 16, 17);
+	Serial2.begin(BAUD_RATE, SERIAL_8N1, 26, 27);
 
 	//set the onboard LED for debug output
 	pinMode(22, OUTPUT);

@@ -7,6 +7,7 @@
 //#include "dw3000_device_api.h"
 #include "SPI.h"
 #include "packet.h"
+#include "watchdog.h"
 
 
 DummyStream* dummy = nullptr;
@@ -21,8 +22,8 @@ static const dwt_config_t config_ch5 = {
     5,                		/* Channel number. */
     DWT_PLEN_64,     		/* Preamble length. Used in TX only. */
     DWT_PAC8,         		/* Preamble acquisition chunk size. Used in RX only. */
-    9,                		/* TX preamble code. Used in TX only. */
-    9,                		/* RX preamble code. Used in RX only. */
+    11,                		/* TX preamble code. Used in TX only. */
+    11,                		/* RX preamble code. Used in RX only. */
     1,                		/* 0 to use standard 8 symbol SFD, 1 to use non-standard 8 symbol, 2 for non-standard 16 symbol SFD and 3 for 4z 8 symbol SDF type */
     DWT_BR_6M8,       		/* Data rate. */
     DWT_PHRMODE_STD,  		/* PHY header mode. */
@@ -409,7 +410,7 @@ bool ranging_responder(TelemetryHolder& th) {
 
     if(poll_status == 1) {
         
-        digitalWrite(LED_D9, false); //LED on 
+        digitalWrite(LED_D9, false); //LED on
 
         radio->clear_system_status();
 
@@ -615,6 +616,9 @@ bool is_freq_5 = true;
 
 //tag
 void loop_initiator() {
+
+    NRF52WatchdogHandler::feed();
+
     //start with clean slate
     radio->clear_system_status();
     radio->dwt_forcetrxoff();
@@ -625,23 +629,29 @@ void loop_initiator() {
     //1000 microseconds * 1000, should be 1 second
     radio->dwt_setrxtimeout(UUS_TO_DWT_TIME * 1000000u);
 
-    digitalWrite(LED_D9, false); //LED on 
-
-    if(!ranging_initiator()) {
-        //delay(1000);
+    digitalWrite(LED_D9, false); //LED on
+    if(!ranging_initiator())
+    {
+        delay(200);
         return;
-    }
+    }  
+    digitalWrite(LED_D9, true); //LED off
 
-    radio->clear_system_status();
-    radio->dwt_forcetrxoff();
-    set_channel_config(false);
-
-    //delay(200);
-    //ranging_initiator();
+    //need this to give time for the responder to finish up; 0 delay results in com issues
+    delay(50);
 
 
+
+    //test: clone above
+    NRF52WatchdogHandler::feed();
+    // radio->clear_system_status();
+    // radio->dwt_forcetrxoff();
+    set_channel_config(true);
+    digitalWrite(LED_D9, false); //LED on
+    ranging_initiator();
     digitalWrite(LED_D9, true); //LED off
     delay(200);
+
 
 }
 
@@ -649,6 +659,7 @@ void loop_initiator() {
 //base
 void loop_responder() {
 
+    NRF52WatchdogHandler::feed();
 
     //start with clean slate
     radio->clear_system_status();
@@ -663,29 +674,22 @@ void loop_responder() {
     TelemetryHolder th_ch9 = TelemetryHolder();
 
     //wait for response
-    if(!ranging_responder(th_ch5)) {
-        Serial.println("AAA");
+    auto result = ranging_responder(th_ch5);
+    if(!result) {
         return;
     }
 
-    //switch frequencies and do it again
-    //set_channel_config(false);
-    radio->clear_system_status();
-    //if(!ranging_responder(th_ch9)) {
-    //    Serial.println("BBB");
-    //    return;
-    //}
+    set_channel_config(true);
+    auto result2 = ranging_responder(th_ch9);
 
-    //print output
-
-    Serial.println("A");
-    th_ch5.print();
-    Serial.println("");
-    th_ch9.print();
-    Serial.println("");
-    Serial.println("B");
-
-
+    if(result2) {
+        Serial.println("A");
+        th_ch5.print();
+        Serial.println();
+        th_ch9.print();
+        Serial.println("\nB");
+        
+    }
 
 }
 
@@ -694,6 +698,10 @@ void loop_responder() {
 
 //starts SPI, Serial, and the DW3000
 void setup() {
+
+
+    NRF52WatchdogHandler::init(2000);
+
 	// sets up the device to use the pins on the bottom left of the rPi header for serial communication.
 	Serial = Uart(NRF_UART0, UARTE0_UART0_IRQn, 31, 7);
 	Serial.begin(BAUD_RATE);
