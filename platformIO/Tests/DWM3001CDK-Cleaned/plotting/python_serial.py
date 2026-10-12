@@ -47,7 +47,7 @@ graph_0.set_ylim(0, 6.3)
 #phase_graph.set_xlim(0, 20)
 graph_1.set_ylim(0, 6.3)
 
-graph_2.set_ylim(0, 6.3)
+graph_2.set_ylim(0, 0.6)
 
 #take new x and y data and put it on the graph
 def update_plot_data(
@@ -177,7 +177,7 @@ def wrap_to_pi(phase_angle: float) -> float:
     return (phase_angle + math.pi) % (2 * math.pi) - math.pi
     ...
 
-moving_average_window_size = 4
+moving_average_window_size = 6
 moving_average_array: list[float] = []
 def moving_average(new_entry: float) -> float:
 
@@ -222,7 +222,7 @@ while False:
     time.sleep(0.1)
 
 
-com_port_name = "COM11"
+com_port_name = "COM17"
 try:
     #open the port with baud 460800
     with serial.Serial(com_port_name, 460800, timeout=1) as ser:
@@ -310,9 +310,13 @@ try:
 
 
                         #constants pulled from the qorvo API
+                        SPEED_OF_LIGHT = 299702547
                         FREQ_OFFSET_MULTIPLIER = (998.4e6 / 2.0 / 1024.0 / 131072.0)
                         FREQ_CH5 = 6489.6e6
                         FREQ_CH9 = 7987.2e6
+                        WAVELENGTH_CH5 = SPEED_OF_LIGHT / FREQ_CH5
+                        WAVELENGTH_CH9 = SPEED_OF_LIGHT / FREQ_CH9
+
                         HERTZ_TO_PPM_MULTIPLIER_CHAN_5 = (-1.0e6 / 6489.6e6)
                         HERTZ_TO_PPM_MULTIPLIER_CHAN_9 = (-1.0e6 / 7987.2e6)
                         DWT_TIME_UNITS = (1.0 / 499.2e6 / 128.0) #15.65e-12s per tick of the radio
@@ -439,9 +443,6 @@ try:
 
                         #######################################normal DSTWR to get rough distance
 
-                        SPEED_OF_LIGHT = 299702547
-
-
                         ch5_tof = (
                             (ch5_round_1_time * ch5_round_2_time - ch5_reply_1_time * ch5_reply_2_time) / 
                             (ch5_round_1_time + ch5_reply_1_time + ch5_round_2_time + ch5_reply_2_time)
@@ -454,9 +455,28 @@ try:
                         
                         tof_average = (ch5_tof + ch9_tof) / 2
 
-                        distance = tof_average * SPEED_OF_LIGHT * DWT_TIME_UNITS
+                        distance_twr = tof_average * SPEED_OF_LIGHT * DWT_TIME_UNITS
 
-                        print(f"TOF Distance: {distance}")
+                        #print(f"TOF Distance: {distance_twr}", end="\t")
+
+
+                        #######################################ambiguity resolution using using rough distance for the ch5-ch9 virtual phase
+
+                        virtual_wavelength = SPEED_OF_LIGHT / (2 * (FREQ_CH9 - FREQ_CH5))
+                        virtual_ambiguity_ct = math.floor(distance_twr / virtual_wavelength)
+
+
+                        print(f"Virtual N: {virtual_ambiguity_ct}", end="\t")
+
+                        distance_virtual = (virtual_phase / (2 * math.pi) + virtual_ambiguity_ct) * virtual_wavelength                        
+                        distance_virtual = moving_average(distance_virtual) #In theory, the device will be polled much faster, making this more viable
+                        print(f"Virtual Dist: {distance_virtual}")
+
+
+                        #######################################ambiguity resolution using the virtual phase
+                        #(Todo)
+
+
                         
 
 
@@ -465,7 +485,7 @@ try:
                         update_plot_data(
                                         #green, red, blue
                                         #drift_estimate_from_cfo, drift_estimate_from_clock, drift_estimate
-                                        canceled_cir_2,canceled_cir_3,virtual_phase,0
+                                        canceled_cir_2,canceled_cir_3,distance_virtual,distance_twr
 
                                         )
 
