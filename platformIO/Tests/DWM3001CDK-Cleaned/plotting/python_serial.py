@@ -19,122 +19,91 @@ plt.ion()
 figax = plt.subplots(3, 1)
 fig: Figure = figax[0]
 axes = figax[1]
-magnitude_graph: Axes = axes[0]
-phase_graph: Axes = axes[1]
-canceled_graph: Axes = axes[2]
+graph_0: Axes = axes[0]
+graph_1: Axes = axes[1]
+graph_2: Axes = axes[2]
 
 
 #create an initial empty line objects
 #anchor is the device connected to the PC through serial, tag is the remote one
-anchor_mag_ln, = magnitude_graph.plot([], [], color='r',)
-tag_mag_ln, = magnitude_graph.plot([], [], color='b',)
+graph_0_ln0, = graph_0.plot([], [], color='r',marker='o')
+graph_0_ln1, = graph_0.plot([], [], color='b',marker='o')
 
-anchor_phase_ln, = phase_graph.plot([], [], color='r',)
-tag_phase_ln, = phase_graph.plot([], [], color='b',)
+graph_1_ln0, = graph_1.plot([], [], color='r',marker='o')
+graph_1_ln1, = graph_1.plot([], [], color='b',marker='o')
 
 
-canceled_phase2_ln, = canceled_graph.plot([], [], color='r',  marker='o')
-canceled_phase3_ln, = canceled_graph.plot([], [], color='b',  marker='o')
-canceled_phase_ln, = canceled_graph.plot([], [], color='g',  marker='o')
-canceled_y_array: list[float] = []
-phase_anchor_array: list[float] = []
-phase_tag_array: list[float] = []
+graph_2_ln1, = graph_2.plot([], [], color='r',  marker='o')
+graph_2_ln2, = graph_2.plot([], [], color='b',  marker='o')
+graph_2_ln0, = graph_2.plot([], [], color='g',  marker='o')
+plot_ln_0: list[float] = []
+plot_ln_1: list[float] = []
+plot_ln_2: list[float] = []
+plot_ln_3: list[float] = []
 
 #pre-set limits if you know them, or auto-scale later
 #magnitude_graph.set_xlim(0, 20)
-magnitude_graph.set_ylim(0, 3500)
+graph_0.set_ylim(0, 6.3)
 #phase_graph.set_xlim(0, 20)
-phase_graph.set_ylim(0, 6.3)
+graph_1.set_ylim(0, 6.3)
 
-display_phase_graph = False
-if display_phase_graph:
-    canceled_graph.set_ylim(-2, 2)
-    canceled_graph.set_xlim(-2, 2)
-else:
-    canceled_graph.set_ylim(0, 6.3)
+graph_2.set_ylim(0, 6.3)
 
 #take new x and y data and put it on the graph
 def update_plot_data(
-        anchor_mag_x: list[float], anchor_mag_y: list[float],
-        tag_mag_x: list[float], tag_mag_y: list[float],
-        anchor_phase_x: list[float], anchor_phase_y: list[float],
-        tag_phase_x: list[float], tag_phase_y: list[float],
-        canceled_y: float,
-        canceled_y2: float,
-        canceled_y3: float,
+        plot_item_0: float,
+        plot_item_1: float,
+        plot_item_2_0: float,
+        plot_item_2_1: float,
         ):
 
-    #ensure inputs are equal in length
-    if(len(anchor_mag_x) != len(anchor_mag_y) or
-       len(tag_mag_x) != len(tag_mag_y) or
-       len(anchor_phase_x) != len(anchor_phase_y) or
-       len(tag_phase_x) != len(tag_phase_y)
-       ):
-        return
 
-    canceled_y_array.append(canceled_y)
-    phase_anchor_array.append(canceled_y2)
-    phase_tag_array.append(canceled_y3)
+    plot_ln_0.append(plot_item_0)
+    plot_ln_1.append(plot_item_1)
+    plot_ln_2.append(plot_item_2_0)
+    plot_ln_3.append(plot_item_2_1)
 
-    if(len(canceled_y_array) > 200):
-        canceled_y_array.pop(0)
-        phase_anchor_array.pop(0)
-        phase_tag_array.pop(0)
+    if(len(plot_ln_0) > 200):
+        plot_ln_0.pop(0)
+        plot_ln_1.pop(0)
+        plot_ln_2.pop(0)
+        plot_ln_3.pop(0)
 
+
+    #create x values to go with the input y values
     canceled_x_vals: list[float] = []
-    for i in range(len(canceled_y_array)):
+    for i in range(len(plot_ln_0)):
         canceled_x_vals.append(i)
 
-    canceled_phase_ln.set_xdata(canceled_x_vals)
-    canceled_phase_ln.set_ydata(canceled_y_array)
+    graph_2_ln0.set_xdata(canceled_x_vals)
+    graph_2_ln0.set_ydata(plot_ln_2)
+    graph_2_ln1.set_xdata(canceled_x_vals)
+    graph_2_ln1.set_ydata(plot_ln_3)
+    #graph_2_ln2.set_xdata(canceled_x_vals)
+    #graph_2_ln2.set_ydata(plot_ln_2)
 
-    canceled_phase2_ln.set_xdata(canceled_x_vals)
-    canceled_phase2_ln.set_ydata(phase_anchor_array)
-    canceled_phase3_ln.set_xdata(canceled_x_vals)
-    canceled_phase3_ln.set_ydata(phase_tag_array)
-
-    #test: circle
-    if display_phase_graph:
-        x_val = math.cos(canceled_y)
-        y_val = math.sin(canceled_y)
-
-        canceled_phase_ln.set_xdata([0, x_val])
-        canceled_phase_ln.set_ydata([0, y_val])
-
-        x_val2 = math.cos(canceled_y + math.pi)
-        y_val2 = math.sin(canceled_y + math.pi)
-
-        x_val3 = math.cos(canceled_y2)
-        y_val3 = math.sin(canceled_y2)
-        x_val3_neg = math.cos(canceled_y2 + math.pi)
-        y_val3_neg = math.sin(canceled_y2 + math.pi)
-
-        canceled_phase2_ln.set_xdata([0, x_val2])
-        canceled_phase2_ln.set_ydata([0, y_val2])
-        #canceled_phase3_ln.set_xdata([x_val3_neg, 0, x_val3])
-        #canceled_phase3_ln.set_ydata([y_val3_neg, 0, y_val3])
 
 
 
     #update the data inside the line object directly
-    anchor_mag_ln.set_xdata(anchor_mag_x)
-    anchor_mag_ln.set_ydata(anchor_mag_y)
-    tag_mag_ln.set_xdata(tag_mag_x)
-    tag_mag_ln.set_ydata(tag_mag_y)
+    graph_0_ln0.set_xdata(canceled_x_vals)
+    graph_0_ln0.set_ydata(plot_ln_0)
+    #graph_0_ln1.set_xdata(tag_mag_x)
+    #graph_0_ln1.set_ydata(tag_mag_y)
 
-    anchor_phase_ln.set_xdata(anchor_phase_x)
-    anchor_phase_ln.set_ydata(anchor_phase_y)
-    tag_phase_ln.set_xdata(tag_phase_x)
-    tag_phase_ln.set_ydata(tag_phase_y)
+    graph_1_ln0.set_xdata(canceled_x_vals)
+    graph_1_ln0.set_ydata(plot_ln_1)
+    #graph_1_ln1.set_xdata(tag_phase_x)
+    #graph_1_ln1.set_ydata(tag_phase_y)
 
     
     #adjust axes limits dynamically if data exceeds views
-    magnitude_graph.relim()
-    magnitude_graph.autoscale_view()
-    phase_graph.relim()
-    phase_graph.autoscale_view()
-    canceled_graph.relim()
-    canceled_graph.autoscale_view()
+    graph_0.relim()
+    graph_0.autoscale_view()
+    graph_1.relim()
+    graph_1.autoscale_view()
+    graph_2.relim()
+    graph_2.autoscale_view()
 
     #force redraw and pause briefly to let the GUI refresh
     fig.canvas.draw()
@@ -253,7 +222,7 @@ while False:
     time.sleep(0.1)
 
 
-com_port_name = "COM17"
+com_port_name = "COM11"
 try:
     #open the port with baud 460800
     with serial.Serial(com_port_name, 460800, timeout=1) as ser:
@@ -437,8 +406,7 @@ try:
 
                         #print(f"cfo_raw_average: {cfo_raw_average}")
 
-                        cfo_fine_av = (cfo_fine_ch5 + cfo_fine_ch9) / 2
-                        cfo_fine_av %= (2 * math.pi)
+                    
 
 
 
@@ -454,23 +422,51 @@ try:
 
 
                         canceled_cir_1 = ch5_poll_phase + ch5_response_phase - slow_drift_offset_ch5 #found_phase_b_diff
-                        canceled_cir_2 = ch5_poll_phase + ch5_response_phase - slow_drift_offset_fine9
+                        canceled_cir_2 = ch9_poll_phase + ch9_response_phase - slow_drift_offset_fine9
                         canceled_cir_3 = ch5_poll_phase + ch5_response_phase - slow_drift_offset_fine5 #found_phase_b_diff
+                        canceled_cir_av = (canceled_cir_2 + canceled_cir_3) / 2
                         canceled_cir_1 = canceled_cir_1 % (2 * math.pi)
                         canceled_cir_2 = canceled_cir_2 % (2 * math.pi)
                         canceled_cir_3 = canceled_cir_3 % (2 * math.pi)
+                        canceled_cir_av = canceled_cir_av % (2 * math.pi)
+                        
+                        
+                        #######################################Combining ch5 and ch9 phases to increase ambiguity cycle
 
+                        virtual_phase = canceled_cir_2 - canceled_cir_3
+                        virtual_phase = virtual_phase % (2 * math.pi)
+
+
+                        #######################################normal DSTWR to get rough distance
+
+                        SPEED_OF_LIGHT = 299702547
+
+
+                        ch5_tof = (
+                            (ch5_round_1_time * ch5_round_2_time - ch5_reply_1_time * ch5_reply_2_time) / 
+                            (ch5_round_1_time + ch5_reply_1_time + ch5_round_2_time + ch5_reply_2_time)
+                            )
+
+                        ch9_tof = (
+                            (ch9_round_1_time * ch9_round_2_time - ch9_reply_1_time * ch9_reply_2_time) / 
+                            (ch9_round_1_time + ch9_reply_1_time + ch9_round_2_time + ch9_reply_2_time)
+                            )
+                        
+                        tof_average = (ch5_tof + ch9_tof) / 2
+
+                        distance = tof_average * SPEED_OF_LIGHT * DWT_TIME_UNITS
+
+                        print(f"TOF Distance: {distance}")
+                        
 
 
               
 
-                        update_plot_data([0], [0], #anchor mag
-                                        [0], [0], #tag mag
-                                        [0], [0], #anchor phase
-                                        [0], [0], #tag phase
+                        update_plot_data(
                                         #green, red, blue
                                         #drift_estimate_from_cfo, drift_estimate_from_clock, drift_estimate
-                                        canceled_cir_3,0,canceled_cir_1
+                                        canceled_cir_2,canceled_cir_3,virtual_phase,0
+
                                         )
 
 
