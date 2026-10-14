@@ -627,12 +627,12 @@ void loop_initiator() {
     set_channel_config(false);
 
     //1000 microseconds * 1000, should be 1 second
-    radio->dwt_setrxtimeout(UUS_TO_DWT_TIME * 1000000u);
+    radio->dwt_setrxtimeout(UUS_TO_DWT_TIME * 100000u);
 
     digitalWrite(LED_D9, false); //LED on
     if(!ranging_initiator())
     {
-        delay(200);
+        delay(100);
         return;
     }  
     digitalWrite(LED_D9, true); //LED off
@@ -650,7 +650,7 @@ void loop_initiator() {
     digitalWrite(LED_D9, false); //LED on
     ranging_initiator();
     digitalWrite(LED_D9, true); //LED off
-    delay(200);
+    delay(100);
 
 
 }

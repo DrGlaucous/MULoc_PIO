@@ -453,9 +453,11 @@ try:
                             (ch9_round_1_time + ch9_reply_1_time + ch9_round_2_time + ch9_reply_2_time)
                             )
                         
-                        tof_average = (ch5_tof + ch9_tof) / 2
+                        tof_average = (ch9_tof + ch9_tof) / 2
 
                         distance_twr = tof_average * SPEED_OF_LIGHT * DWT_TIME_UNITS
+
+                        #distance_twr = moving_average(distance_twr)
 
                         #print(f"TOF Distance: {distance_twr}", end="\t")
 
@@ -466,16 +468,27 @@ try:
                         virtual_ambiguity_ct = math.floor(distance_twr / virtual_wavelength)
 
 
-                        print(f"Virtual N: {virtual_ambiguity_ct}", end="\t")
+                        #print(f"Virtual N: {virtual_ambiguity_ct}", end="\t")
 
                         distance_virtual = (virtual_phase / (2 * math.pi) + virtual_ambiguity_ct) * virtual_wavelength                        
-                        distance_virtual = moving_average(distance_virtual) #In theory, the device will be polled much faster, making this more viable
-                        print(f"Virtual Dist: {distance_virtual}")
+                        #distance_virtual = moving_average(distance_virtual) #In theory, the device will be polled much faster, making this more viable
+                        #print(f"Virtual Dist: {distance_virtual}")
 
 
                         #######################################ambiguity resolution using the virtual phase
                         #(Todo)
 
+                        #resolve for 5
+                        ch5_ambiguity_ct = math.floor(distance_virtual / WAVELENGTH_CH5)
+                        distance_ch5 = (canceled_cir_3 / (2 * math.pi) + ch5_ambiguity_ct) * WAVELENGTH_CH5
+                        #resolve for 9
+                        ch9_ambiguity_ct = math.floor(distance_virtual / WAVELENGTH_CH9)
+                        distance_ch9 = (canceled_cir_2 / (2 * math.pi) + ch9_ambiguity_ct) * WAVELENGTH_CH9
+
+                        dist_average = (distance_ch5 + distance_ch9) / 2
+
+
+                        print(f"Dist5: {distance_ch5}\t\t Dist9: {distance_ch9}\t\t DistA: {dist_average}")
 
                         
 
@@ -485,7 +498,8 @@ try:
                         update_plot_data(
                                         #green, red, blue
                                         #drift_estimate_from_cfo, drift_estimate_from_clock, drift_estimate
-                                        canceled_cir_2,canceled_cir_3,distance_virtual,distance_twr
+                                        #canceled_cir_2,canceled_cir_3,distance_virtual,distance_twr
+                                        canceled_cir_2,canceled_cir_3,dist_average,distance_twr
 
                                         )
 
