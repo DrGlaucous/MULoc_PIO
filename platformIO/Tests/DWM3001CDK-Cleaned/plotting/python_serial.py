@@ -178,27 +178,30 @@ def wrap_to_pi(phase_angle: float) -> float:
     return (phase_angle + math.pi) % (2 * math.pi) - math.pi
     ...
 
-moving_average_window_size = 6
-moving_average_array: list[float] = []
-def moving_average(new_entry: float) -> float:
 
-    moving_average_array.append(new_entry)
-    if(len(moving_average_array) > moving_average_window_size):
-        moving_average_array.pop(0)
-        ...
-
-    average = 0    
-    for i in moving_average_array:
-        average += i
-        ...
-
-    average /= len(moving_average_array)
-    return average
-
-    ...
+#does a simple moving average over a certain timespan
+class MovingAverage:
+    def __init__(self, window_size: int = 6):
+        self.window_size = window_size
+        self.array: list[float] = []
 
 
+    def add(self, new_entry: float) -> float:
+        self.array.append(new_entry)
+        if(len(self.array) > self.window_size):
+            self.array.pop(0)
 
+        average = 0    
+        for i in self.array:
+            average += i
+
+        average /= len(self.array)
+        return average
+
+
+
+
+    
 #####################################SERIAL STUFF
 
 
@@ -236,6 +239,9 @@ try:
         #print(f"Received: {response.decode('utf-8', errors='ignore')}")
 
         queue: deque[int] = deque()
+
+        moving_av_1: MovingAverage = MovingAverage(6)
+        moving_av_2: MovingAverage = MovingAverage(6)
 
 
         #successfully opened, start the mainloop
@@ -434,6 +440,9 @@ try:
                         canceled_cir_1 = canceled_cir_1 % (2 * math.pi)
                         ch9_recovered_phase = ch9_recovered_phase % (2 * math.pi)
                         ch5_recovered_phase = ch5_recovered_phase % (2 * math.pi)
+
+                        #ch9_recovered_phase = moving_av_1.add(ch9_recovered_phase)
+                        #ch5_recovered_phase = moving_av_2.add(ch5_recovered_phase)
                         
                         
                         #######################################Combining ch5 and ch9 phases to increase ambiguity cycle
@@ -460,7 +469,9 @@ try:
 
                         #distance_twr = moving_average(distance_twr)
 
-                        #print(f"TOF: {tof_average}", end="\t")
+                        #distance_twr = moving_av_1.add(distance_twr)
+
+                        print(f"Distance TWR: {distance_twr}", end="\t")
 
 
                         #######################################ambiguity resolution using using rough distance for the ch5-ch9 virtual phase
@@ -504,7 +515,7 @@ try:
                                         #green, red, blue
                                         #drift_estimate_from_cfo, drift_estimate_from_clock, drift_estimate
                                         #canceled_cir_2,canceled_cir_3,distance_virtual,distance_twr
-                                        ch9_recovered_phase,ch5_recovered_phase,dist_average,distance_twr
+                                        ch9_recovered_phase,ch5_recovered_phase,distance_virtual,distance_twr
 
                                         )
 
