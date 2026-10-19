@@ -226,7 +226,7 @@ while False:
     time.sleep(0.1)
 
 
-com_port_name = "COM11"
+com_port_name = "COM17"
 try:
     #open the port with baud 460800
     with serial.Serial(com_port_name, 460800, timeout=1) as ser:
@@ -486,10 +486,10 @@ try:
                         distance_virtual = (virtual_phase / (2 * math.pi) + virtual_ambiguity_ct) * virtual_wavelength
 
                         #looping protection
-                        if(distance_virtual - distance_twr < (virtual_wavelength * 0.5)):
-                            distance_virtual += virtual_wavelength
-                        elif(distance_virtual - distance_twr > (virtual_wavelength * 0.5)):
-                            distance_virtual -= virtual_wavelength
+                        #if(distance_virtual - distance_twr < (virtual_wavelength * 0.5)):
+                        #    distance_virtual += virtual_wavelength
+                        #elif(distance_virtual - distance_twr > (virtual_wavelength * 0.5)):
+                        #    distance_virtual -= virtual_wavelength
 
                         #distance_virtual = (-virtual_phase / 2 / math.pi + virtual_ambiguity_ct)*virtual_wavelength
 
@@ -503,10 +503,10 @@ try:
                         #resolve for 5
                         ch5_ambiguity_ct = math.floor(distance_virtual / WAVELENGTH_CH5)
                         distance_ch5 = (ch5_recovered_phase / (2 * math.pi) + ch5_ambiguity_ct) * WAVELENGTH_CH5
-                        if(distance_ch5 - distance_virtual < (WAVELENGTH_CH5 * 0.5)):
-                            distance_ch5 += WAVELENGTH_CH5
-                        elif(distance_ch5 - distance_virtual > (WAVELENGTH_CH5 * 0.5)):
-                            distance_ch5 -= WAVELENGTH_CH5
+                        #if(distance_ch5 - distance_virtual < (WAVELENGTH_CH5 * 0.5)):
+                        #    distance_ch5 += WAVELENGTH_CH5
+                        #elif(distance_ch5 - distance_virtual > (WAVELENGTH_CH5 * 0.5)):
+                        #    distance_ch5 -= WAVELENGTH_CH5
 
 
                         #resolve for 9
@@ -531,7 +531,7 @@ try:
                                         #green, red, blue
                                         #drift_estimate_from_cfo, drift_estimate_from_clock, drift_estimate
                                         #canceled_cir_2,canceled_cir_3,distance_virtual,distance_twr
-                                        ch9_recovered_phase,virtual_phase,dist_average,distance_twr
+                                        ch9_recovered_phase,virtual_phase,distance_virtual,distance_twr
 
                                         )
 

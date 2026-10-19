@@ -4,7 +4,7 @@
 ///////////////////code-specific defines
 
 //true if the device is a tag
-#define TAG
+//#define TAG
 
 //needs to be changed for each anchor to do proper scheduling
 #define ANCHOR_ID 1
@@ -13,8 +13,8 @@
 #define ANCHOR_NUM 2
 
 //we need to calibrate the board in order to get these
-#define RX_ANT_DELAY 16385
-#define TX_ANT_DELAY 16385
+#define RX_ANT_DELAY 16375
+#define TX_ANT_DELAY 16375
 
 //time after sending a packet before enabling RX mode
 #define RX_AFTER_TX_DELAY 450
