@@ -541,15 +541,15 @@ bool ranging_responder(TelemetryHolder& th) {
                     }
 
                 } else {
-                    Serial.print("PF RX Error: ");
-                    Serial.println(pfinal_status);
+                    //Serial.print("PF RX Error: ");
+                    //Serial.println(pfinal_status);
                     return false;
                 }
 
 
             } else {
-                Serial.print("RX Error: ");
-                Serial.println(final_status);
+                //Serial.print("RX Error: ");
+                //Serial.println(final_status);
                 return false;
             }
 
@@ -557,15 +557,15 @@ bool ranging_responder(TelemetryHolder& th) {
 
 
         } else {
-            Serial.print("TX Error");
+            //Serial.print("TX Error");
             return false;
         }
 
 
 
     } else {
-        Serial.print("RX error: ");
-        Serial.println(poll_status);
+        //Serial.print("RX error: ");
+        //Serial.println(poll_status);
         return false;
     }
 
@@ -650,7 +650,7 @@ void loop_initiator() {
     digitalWrite(LED_D9, false); //LED on
     ranging_initiator();
     digitalWrite(LED_D9, true); //LED off
-    delay(100);
+    delay(50);
 
 
 }

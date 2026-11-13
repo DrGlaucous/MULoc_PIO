@@ -1,7 +1,7 @@
 import time
 import random
-import matplotlib.pyplot as plt
 import serial
+import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 from collections import deque
@@ -199,6 +199,30 @@ class MovingAverage:
         return average
 
 
+class PhaseUnwrapper:
+
+    def __init__(self):
+        self.last_entry = 0
+
+    def unwrap_entry(self, entry: float) -> float:
+        #ensure entry is within 0->2pi
+        entry = entry % (2*math.pi)
+
+        #shrink down the unwrapped entry by the same amount
+        last_entry = self.last_entry % (2 * math.pi)
+        unwrapped_count = self.last_entry // (2 * math.pi)
+
+
+        #if we jumped by more than half a phase, assume we wrapped
+        if(abs(last_entry - entry) > (math.pi * 1.0)):
+            ...
+            jump_sign = (last_entry > entry) - (last_entry < entry)
+            unwrapped_count += jump_sign
+
+        self.last_entry = entry + (unwrapped_count * 2 * math.pi)
+        return self.last_entry
+
+    ...
 
 
     
@@ -242,6 +266,9 @@ try:
 
         moving_av_1: MovingAverage = MovingAverage(6)
         moving_av_2: MovingAverage = MovingAverage(6)
+        moving_av_slow5: MovingAverage = MovingAverage(6)
+        moving_av_slow9: MovingAverage = MovingAverage(6)
+        phase_unwrapper: PhaseUnwrapper = PhaseUnwrapper()
 
 
         #successfully opened, start the mainloop
@@ -392,10 +419,6 @@ try:
                             cfo_fine_ch9 += wrap_factor
                         if(cfo_fine_ch9 - cfo_coarse > wrap_factor / 2):
                             cfo_fine_ch9 -= wrap_factor
-                        #cfo_fine_ch9 %= wrap_factor
-
-                        slow_drift_offset_fine9 = 2*math.pi*(FREQ_CH9)*cfo_fine_ch9*1e-6*sample_delay
-                        #print(f"slow_drift_offset_fine9: {slow_drift_offset_fine9}")
 
 
                         #########################################CFO_Fine with channel 5
@@ -410,14 +433,22 @@ try:
                             cfo_fine_ch5 += wrap_factor
                         if(cfo_fine_ch5 - cfo_coarse > wrap_factor / 2):
                             cfo_fine_ch5 -= wrap_factor
-                        #cfo_fine_ch5 %= wrap_factor
 
-                        
-                        #note: we could probably average cfo_fine_ch5 and ch9, but only if we do it before we apply it to slow_drift_offset
+
+                        ##############Average them
+
+                        #if I try to use this, I get random jumps in the (mostly correct) data, so I'll avoid using this for now
+                        cfo_fine_average = (cfo_fine_ch5 + cfo_fine_ch9) * 0.5
+
+
+                        ###############turn the accurate clock offsets into phase offsets for each frequency
                         slow_drift_offset_fine5 = 2*math.pi*(FREQ_CH5)*cfo_fine_ch5*1e-6*sample_delay
-                        #print(f"slow_drift_offset_fine5: {slow_drift_offset_fine5}")
+                        slow_drift_offset_fine9 = 2*math.pi*(FREQ_CH9)*cfo_fine_ch9*1e-6*sample_delay
+                        #print(f"slow_drift_offset_fine9: {slow_drift_offset_fine9}")
 
-                        #print(f"cfo_raw_average: {cfo_raw_average}")
+                        #smooth them out like what the research paper outlines
+                        #slow_drift_offset_fine5 = moving_av_slow5.add(slow_drift_offset_fine5)
+                        #slow_drift_offset_fine9 = moving_av_slow5.add(slow_drift_offset_fine9)
 
                     
 
@@ -434,10 +465,10 @@ try:
                             ch5_final_phase += 2 * math.pi
 
 
-                        canceled_cir_1 = ch5_poll_phase + ch5_response_phase - slow_drift_offset_ch5 #found_phase_b_diff
+                        #canceled_cir_1 = ch5_poll_phase + ch5_response_phase - slow_drift_offset_ch5 #found_phase_b_diff
                         ch9_recovered_phase = ch9_poll_phase + ch9_response_phase - slow_drift_offset_fine9
                         ch5_recovered_phase = ch5_poll_phase + ch5_response_phase - slow_drift_offset_fine5 #found_phase_b_diff
-                        canceled_cir_1 = canceled_cir_1 % (2 * math.pi)
+                        #canceled_cir_1 = canceled_cir_1 % (2 * math.pi)
                         ch9_recovered_phase = ch9_recovered_phase % (2 * math.pi)
                         ch5_recovered_phase = ch5_recovered_phase % (2 * math.pi)
 
@@ -464,12 +495,15 @@ try:
                             )
                         
                         tof_average = (ch5_tof + ch9_tof) / 2
+                        
+                        #engineering
+
 
                         distance_twr = tof_average * SPEED_OF_LIGHT * DWT_TIME_UNITS
 
                         #distance_twr = moving_average(distance_twr)
 
-                        #distance_twr = moving_av_1.add(distance_twr)
+                        distance_twr = moving_av_1.add(distance_twr)
 
                         print(f"Distance TWR: {distance_twr}", end="\t")
 
@@ -477,24 +511,28 @@ try:
                         #######################################ambiguity resolution using using rough distance for the ch5-ch9 virtual phase
 
                         #both of these equations yield the same thing
-                        virtual_wavelength = SPEED_OF_LIGHT / ((FREQ_CH9 - FREQ_CH5) * 2)
-                        virtual_wavelength = (WAVELENGTH_CH5 * WAVELENGTH_CH9) / (WAVELENGTH_CH5 - WAVELENGTH_CH9) * 0.5
+                        virtual_wavelength = SPEED_OF_LIGHT / (2*(FREQ_CH9 - FREQ_CH5))
+                        #virtual_wavelength = (WAVELENGTH_CH5 * WAVELENGTH_CH9) / (WAVELENGTH_CH5 - WAVELENGTH_CH9)# * 0.5
                         
-                        virtual_ambiguity_ct = math.floor(distance_twr / virtual_wavelength)
+                        virtual_ambiguity_ct = round((distance_twr - virtual_wavelength) / virtual_wavelength)
 
+                        #virtual_phase += math.pi
+                        #virtual_phase %= (2*math.pi)
 
                         distance_virtual = (virtual_phase / (2 * math.pi) + virtual_ambiguity_ct) * virtual_wavelength
 
+                        #distance_virtual = (phase_unwrapper.unwrap_entry(virtual_phase) / (2*math.pi)) * virtual_wavelength
+                        
                         #looping protection
-                        #if(distance_virtual - distance_twr < (virtual_wavelength * 0.5)):
-                        #    distance_virtual += virtual_wavelength
-                        #elif(distance_virtual - distance_twr > (virtual_wavelength * 0.5)):
-                        #    distance_virtual -= virtual_wavelength
+                        if(distance_virtual - distance_twr < -(virtual_wavelength * 0.5)):
+                           distance_virtual += virtual_wavelength
+                        elif(distance_virtual - distance_twr > (virtual_wavelength * 0.5)):
+                           distance_virtual -= virtual_wavelength
 
                         #distance_virtual = (-virtual_phase / 2 / math.pi + virtual_ambiguity_ct)*virtual_wavelength
 
                         #distance_virtual = moving_average(distance_virtual) #In theory, the device will be polled much faster, making this more viable
-                        #print(f"Virtual Dist: {distance_virtual}")
+                        print(f"Virtual Dist: {distance_virtual}")
 
 
                         #######################################ambiguity resolution using the virtual phase
@@ -520,18 +558,21 @@ try:
                         dist_average = (distance_ch5 + distance_ch9) / 2
 
 
-                        print(f"Dist5: {distance_ch5}\t\t Dist9: {distance_ch9}\t\t DistA: {dist_average}")
+                        #print(f"Dist5: {distance_ch5}\t\t Dist9: {distance_ch9}\t\t DistA: {dist_average}")
 
                         
 
 
               
-
-                        update_plot_data(
+                        if(True):
+                            update_plot_data(
                                         #green, red, blue
+                                        #green, red
                                         #drift_estimate_from_cfo, drift_estimate_from_clock, drift_estimate
                                         #canceled_cir_2,canceled_cir_3,distance_virtual,distance_twr
                                         ch9_recovered_phase,virtual_phase,distance_virtual,distance_twr
+
+                                        #ch5_recovered_phase,virtual_phase,dist_average,distance_twr
 
                                         )
 
@@ -541,7 +582,7 @@ try:
 
             fig.canvas.draw()
             fig.canvas.flush_events()
-            time.sleep(0.01)
+            time.sleep(0.001)
                 
 
 
