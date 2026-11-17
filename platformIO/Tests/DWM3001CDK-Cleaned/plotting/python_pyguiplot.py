@@ -90,6 +90,30 @@ class MovingAverage:
         average /= len(self.array)
         return average
 
+#ditto, but for radians
+class CircularMovingAverage:
+
+  def __init__(self, window_size):
+    self.window = deque(maxlen=window_size)
+    self.sum_sin = 0.0
+    self.sum_cos = 0.0
+
+  def add(self, angle_rad):
+    if len(self.window) == self.window.maxlen:
+      old_sin, old_cos = self.window.popleft()
+      self.sum_sin -= old_sin
+      self.sum_cos -= old_cos
+
+    s = math.sin(angle_rad)
+    c = math.cos(angle_rad)
+    self.window.append((s, c))
+    self.sum_sin += s
+    self.sum_cos += c
+
+    return math.atan2(self.sum_sin, self.sum_cos)
+
+
+
 
 class PhaseUnwrapper:
 
@@ -137,7 +161,7 @@ with dpg.window(label="Rolling Line Graphs", width=800, height=820):
         #make x and y axis
         dpg.add_plot_axis(dpg.mvXAxis, label="Time (s)", tag="x_0_axis")
         with dpg.plot_axis(dpg.mvYAxis, label="Amplitude", tag="y_0_axis"):
-            dpg.add_line_series([], [], label="Signal", tag="phase_one")
+            dpg.add_line_series([], [], label="Phase", tag="phase_one")
         #autoscale
         dpg.set_axis_limits("y_0_axis", 0, 2 * math.pi)
 
@@ -147,7 +171,7 @@ with dpg.window(label="Rolling Line Graphs", width=800, height=820):
         #make x and y axis
         dpg.add_plot_axis(dpg.mvXAxis, label="Time (s)", tag="x_1_axis")
         with dpg.plot_axis(dpg.mvYAxis, label="Amplitude", tag="y_1_axis"):
-            dpg.add_line_series([], [], label="Signal", tag="phase_two")
+            dpg.add_line_series([], [], label="Phase", tag="phase_two")
         #autoscale
         dpg.set_axis_limits("y_1_axis", 0, 2 * math.pi)
 
@@ -157,7 +181,10 @@ with dpg.window(label="Rolling Line Graphs", width=800, height=820):
         #make x and y axis
         dpg.add_plot_axis(dpg.mvXAxis, label="Time (s)", tag="x_2_axis")
         with dpg.plot_axis(dpg.mvYAxis, label="Amplitude", tag="y_2_axis"):
-            dpg.add_line_series([], [], label="Signal", tag="distances")
+            dpg.add_line_series([], [], label="Distance", tag="distance_one")
+            dpg.add_line_series([], [], label="Distance", tag="distance_two")
+
+
         #autoscale
         dpg.set_axis_limits("y_2_axis", 0, 0.3)
 
@@ -169,8 +196,6 @@ dpg.setup_dearpygui()
 dpg.show_viewport()
 
 #take new x and y data and put it on the graph
-x_val: float = 0.0
-plot_x_vals: list[float] = []
 plot_ln_0: list[float] = []
 plot_ln_1: list[float] = []
 plot_ln_2: list[float] = []
@@ -181,10 +206,6 @@ def update_plot_data(
         plot_item_2_0: float,
         plot_item_2_1: float,
         ):
-    global x_val
-
-    plot_x_vals.append(x_val)
-    x_val += 1.0
 
     plot_ln_0.append(plot_item_0)
     plot_ln_1.append(plot_item_1)
@@ -205,7 +226,8 @@ def update_plot_data(
 
     dpg.set_value("phase_one", [canceled_x_vals, plot_ln_0])
     dpg.set_value("phase_two", [canceled_x_vals, plot_ln_1])
-    dpg.set_value("distances", [canceled_x_vals, plot_ln_2])
+    dpg.set_value("distance_one", [canceled_x_vals, plot_ln_2])
+    dpg.set_value("distance_two", [canceled_x_vals, plot_ln_3])
 
 
 
@@ -214,7 +236,8 @@ def update_plot_data(
         dpg.set_axis_limits("x_0_axis", canceled_x_vals[0], canceled_x_vals[-1])
         dpg.set_axis_limits("x_1_axis", canceled_x_vals[0], canceled_x_vals[-1])
         dpg.set_axis_limits("x_2_axis", canceled_x_vals[0], canceled_x_vals[-1])
-    ...
+
+
 
 #####################################SERIAL STUFF (main)
 
@@ -236,6 +259,8 @@ try:
         moving_av_2: MovingAverage = MovingAverage(6)
         moving_av_slow5: MovingAverage = MovingAverage(6)
         moving_av_slow9: MovingAverage = MovingAverage(6)
+        moving_av_rad5: CircularMovingAverage = CircularMovingAverage(6)
+        moving_av_rad9: CircularMovingAverage = CircularMovingAverage(6)
         phase_unwrapper: PhaseUnwrapper = PhaseUnwrapper()
 
 
@@ -443,8 +468,8 @@ try:
                         ch9_recovered_phase = ch9_recovered_phase % (2 * math.pi)
                         ch5_recovered_phase = ch5_recovered_phase % (2 * math.pi)
 
-                        #ch9_recovered_phase = moving_av_1.add(ch9_recovered_phase)
-                        #ch5_recovered_phase = moving_av_2.add(ch5_recovered_phase)
+                        ch9_recovered_phase = moving_av_rad9.add(ch9_recovered_phase) + math.pi
+                        ch5_recovered_phase = moving_av_rad5.add(ch5_recovered_phase) + math.pi
                         
                         
                         #######################################Combining ch5 and ch9 phases to increase ambiguity cycle
@@ -471,8 +496,6 @@ try:
 
 
                         distance_twr = tof_average * SPEED_OF_LIGHT * DWT_TIME_UNITS
-
-                        #distance_twr = moving_average(distance_twr)
 
                         distance_twr = moving_av_1.add(distance_twr)
 
@@ -537,13 +560,12 @@ try:
               
                         if(True):
                             update_plot_data(
-                                        #green, red, blue
-                                        #green, red
+                                        #blue, red
                                         #drift_estimate_from_cfo, drift_estimate_from_clock, drift_estimate
                                         #canceled_cir_2,canceled_cir_3,distance_virtual,distance_twr
-                                        ch9_recovered_phase,virtual_phase,distance_virtual,distance_twr
+                                        #ch9_recovered_phase,virtual_phase,distance_virtual,distance_twr
 
-                                        #ch5_recovered_phase,virtual_phase,dist_average,distance_twr
+                                        ch5_recovered_phase,virtual_phase,dist_average,distance_twr
 
                                         )
 
