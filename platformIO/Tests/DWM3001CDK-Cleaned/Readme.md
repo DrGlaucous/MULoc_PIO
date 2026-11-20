@@ -41,6 +41,12 @@ The phase angle I'm using is actually the difference between two higher frequenc
 
 
 
+Stages of completion (what I need to do or add in order to make a working end-design):
+
+- 1. Get phase resolution working reliably between two UWB radios (no slipping or jumping at any distance due to noise). Although we are still allowed to have phase shifting due to nlos items in the way (like hands, limbs, etc.)
+- 2. Get networked protocol working reliably between 5+ tags squawking in a token ring to each other.
+- 3. Test, see how badly NLOS affects trilateration between these tags
+- 4. If result is too poor, add accelerometers to the mix. Need to determine the proper filter setup for this. Accelerometers may be in any orientation, I just want them to detect how much movement relative to the UWB-measured distances.
 
 
 

@@ -154,13 +154,13 @@ start_time = time.time()
 dpg.create_context()
 
 #create an imgui window and plots within it
-with dpg.window(label="Rolling Line Graphs", width=800, height=820):
+with dpg.window(label="Phases", width=800, height=820):
     with dpg.plot(label="Phase 0", height=-0.3, width=-1):
         dpg.add_plot_legend()
         
         #make x and y axis
         dpg.add_plot_axis(dpg.mvXAxis, label="Time (s)", tag="x_0_axis")
-        with dpg.plot_axis(dpg.mvYAxis, label="Amplitude", tag="y_0_axis"):
+        with dpg.plot_axis(dpg.mvYAxis, label="Phase", tag="y_0_axis"):
             dpg.add_line_series([], [], label="Phase", tag="phase_one")
         #autoscale
         dpg.set_axis_limits("y_0_axis", 0, 2 * math.pi)
@@ -170,23 +170,34 @@ with dpg.window(label="Rolling Line Graphs", width=800, height=820):
         
         #make x and y axis
         dpg.add_plot_axis(dpg.mvXAxis, label="Time (s)", tag="x_1_axis")
-        with dpg.plot_axis(dpg.mvYAxis, label="Amplitude", tag="y_1_axis"):
+        with dpg.plot_axis(dpg.mvYAxis, label="Phase", tag="y_1_axis"):
             dpg.add_line_series([], [], label="Phase", tag="phase_two")
         #autoscale
         dpg.set_axis_limits("y_1_axis", 0, 2 * math.pi)
 
-    with dpg.plot(label="Distance", height=-0.3, width=-1):
+    with dpg.plot(label="Phase 2", height=-0.3, width=-1):
         dpg.add_plot_legend()
         
         #make x and y axis
         dpg.add_plot_axis(dpg.mvXAxis, label="Time (s)", tag="x_2_axis")
-        with dpg.plot_axis(dpg.mvYAxis, label="Amplitude", tag="y_2_axis"):
-            dpg.add_line_series([], [], label="Distance", tag="distance_one")
-            dpg.add_line_series([], [], label="Distance", tag="distance_two")
+        with dpg.plot_axis(dpg.mvYAxis, label="Phase", tag="y_2_axis"):
+            dpg.add_line_series([], [], label="Phase", tag="phase_three")
+        #autoscale
+        dpg.set_axis_limits("y_2_axis", 0, 2 * math.pi)
+
+with dpg.window(label="Distances", width=800, height=820):
+    with dpg.plot(label="Distance", height=-0.3, width=-1):
+        dpg.add_plot_legend()
+        
+        #make x and y axis
+        dpg.add_plot_axis(dpg.mvXAxis, label="Time (s)", tag="x_3_axis")
+        with dpg.plot_axis(dpg.mvYAxis, label="Amplitude", tag="y_3_axis"):
+            dpg.add_line_series([], [], label="Finalized distance", tag="distance_one")
+            dpg.add_line_series([], [], label="Smoothed DSTWR", tag="distance_two")
 
 
         #autoscale
-        dpg.set_axis_limits("y_2_axis", 0, 0.3)
+        dpg.set_axis_limits("y_3_axis", 0, 0.3)
 
 
 
@@ -200,23 +211,27 @@ plot_ln_0: list[float] = []
 plot_ln_1: list[float] = []
 plot_ln_2: list[float] = []
 plot_ln_3: list[float] = []
+plot_ln_4: list[float] = []
 def update_plot_data(
         plot_item_0: float,
         plot_item_1: float,
-        plot_item_2_0: float,
-        plot_item_2_1: float,
+        plot_item_2: float,
+        plot_item_3_0: float,
+        plot_item_3_1: float,
         ):
 
     plot_ln_0.append(plot_item_0)
     plot_ln_1.append(plot_item_1)
-    plot_ln_2.append(plot_item_2_0)
-    plot_ln_3.append(plot_item_2_1)
+    plot_ln_2.append(plot_item_2)
+    plot_ln_3.append(plot_item_3_0)
+    plot_ln_4.append(plot_item_3_1)
 
     if(len(plot_ln_0) > MAX_POINTS):
         plot_ln_0.pop(0)
         plot_ln_1.pop(0)
         plot_ln_2.pop(0)
         plot_ln_3.pop(0)
+        plot_ln_4.pop(0)
 
 
     #create x values to go with the input y values
@@ -226,8 +241,9 @@ def update_plot_data(
 
     dpg.set_value("phase_one", [canceled_x_vals, plot_ln_0])
     dpg.set_value("phase_two", [canceled_x_vals, plot_ln_1])
-    dpg.set_value("distance_one", [canceled_x_vals, plot_ln_2])
-    dpg.set_value("distance_two", [canceled_x_vals, plot_ln_3])
+    dpg.set_value("phase_three", [canceled_x_vals, plot_ln_2])
+    dpg.set_value("distance_one", [canceled_x_vals, plot_ln_3])
+    dpg.set_value("distance_two", [canceled_x_vals, plot_ln_4])
 
 
 
@@ -236,6 +252,7 @@ def update_plot_data(
         dpg.set_axis_limits("x_0_axis", canceled_x_vals[0], canceled_x_vals[-1])
         dpg.set_axis_limits("x_1_axis", canceled_x_vals[0], canceled_x_vals[-1])
         dpg.set_axis_limits("x_2_axis", canceled_x_vals[0], canceled_x_vals[-1])
+        dpg.set_axis_limits("x_3_axis", canceled_x_vals[0], canceled_x_vals[-1])
 
 
 
@@ -530,21 +547,26 @@ try:
 
 
                         #######################################ambiguity resolution using the virtual phase
-                        #(Todo)
 
-                        #resolve for 5
-                        ch5_ambiguity_ct = math.floor(distance_virtual / WAVELENGTH_CH5)
+                        #round((distance_twr - virtual_wavelength) / virtual_wavelength)
+
+                        #resolve for 5                        
+                        ch5_ambiguity_ct = round((distance_virtual - WAVELENGTH_CH5) / WAVELENGTH_CH5)
+
+                        #ch5_ambiguity_ct = math.floor(distance_virtual / WAVELENGTH_CH5)
                         distance_ch5 = (ch5_recovered_phase / (2 * math.pi) + ch5_ambiguity_ct) * WAVELENGTH_CH5
-                        #if(distance_ch5 - distance_virtual < (WAVELENGTH_CH5 * 0.5)):
-                        #    distance_ch5 += WAVELENGTH_CH5
-                        #elif(distance_ch5 - distance_virtual > (WAVELENGTH_CH5 * 0.5)):
-                        #    distance_ch5 -= WAVELENGTH_CH5
+                        if(distance_ch5 - distance_virtual < -(WAVELENGTH_CH5 * 0.5)):
+                            distance_ch5 += WAVELENGTH_CH5
+                        elif(distance_ch5 - distance_virtual > (WAVELENGTH_CH5 * 0.5)):
+                            distance_ch5 -= WAVELENGTH_CH5
 
 
                         #resolve for 9
-                        ch9_ambiguity_ct = math.floor(distance_virtual / WAVELENGTH_CH9)
+                        ch9_ambiguity_ct = round((distance_virtual - WAVELENGTH_CH9) / WAVELENGTH_CH9)
+
+                        #ch9_ambiguity_ct = math.floor(distance_virtual / WAVELENGTH_CH9)
                         distance_ch9 = (ch9_recovered_phase / (2 * math.pi) + ch9_ambiguity_ct) * WAVELENGTH_CH9
-                        if(distance_ch9 - distance_virtual < (WAVELENGTH_CH9 * 0.5)):
+                        if(distance_ch9 - distance_virtual < -(WAVELENGTH_CH9 * 0.5)):
                             distance_ch9 += WAVELENGTH_CH9
                         elif(distance_ch9 - distance_virtual > (WAVELENGTH_CH9 * 0.5)):
                             distance_ch9 -= WAVELENGTH_CH9
@@ -565,7 +587,7 @@ try:
                                         #canceled_cir_2,canceled_cir_3,distance_virtual,distance_twr
                                         #ch9_recovered_phase,virtual_phase,distance_virtual,distance_twr
 
-                                        ch5_recovered_phase,virtual_phase,dist_average,distance_twr
+                                        ch5_recovered_phase,ch9_recovered_phase,virtual_phase,dist_average,distance_twr
 
                                         )
 

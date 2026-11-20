@@ -627,7 +627,7 @@ void loop_initiator() {
     set_channel_config(false);
 
     //1000 microseconds * 1000, should be 1 second
-    radio->dwt_setrxtimeout(UUS_TO_DWT_TIME * 100000u);
+    radio->dwt_setrxtimeout(UUS_TO_DWT_TIME * 20000u);
 
     digitalWrite(LED_D9, false); //LED on
     if(!ranging_initiator())
@@ -668,7 +668,7 @@ void loop_responder() {
     set_channel_config(false);
 
     //1000 microseconds * 1000, should be 1 second
-    radio->dwt_setrxtimeout(UUS_TO_DWT_TIME * 1000000u);
+    radio->dwt_setrxtimeout(UUS_TO_DWT_TIME * 20000u);
 
     TelemetryHolder th_ch5 = TelemetryHolder();
     TelemetryHolder th_ch9 = TelemetryHolder();
