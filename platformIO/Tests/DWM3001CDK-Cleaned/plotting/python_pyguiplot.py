@@ -514,7 +514,7 @@ try:
 
                         distance_twr = tof_average * SPEED_OF_LIGHT * DWT_TIME_UNITS
 
-                        distance_twr = moving_av_1.add(distance_twr)
+                        #distance_twr = moving_av_1.add(distance_twr)
 
                         print(f"Distance TWR: {distance_twr}", end="\t")
 

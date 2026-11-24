@@ -29,7 +29,7 @@ static const dwt_config_t config_ch5 = {
     DWT_PHRMODE_STD,  		/* PHY header mode. */
     DWT_PHRRATE_STD,  		/* PHY header rate. */
     (64 + 1 + 8 - 8),    	/* SFD timeout (preamble length + 1 + SFD length - PAC size). Used in RX only. */
-    DWT_STS_MODE_OFF, 		/* STS disabled */
+    DWT_STS_MODE_1 | DWT_STS_MODE_SDC, 		/* STS disabled */
     DWT_STS_LEN_64,   		/* STS length see allowed values in Enum dwt_sts_lengths_e */
     DWT_PDOA_M0       		/* PDOA mode off */
 };
@@ -45,7 +45,7 @@ static const dwt_config_t config_ch9 = {
     DWT_PHRMODE_STD,  		/* PHY header mode. */
     DWT_PHRRATE_STD,  		/* PHY header rate. */
     (64 + 1 + 8 - 8),    	/* SFD timeout (preamble length + 1 + SFD length - PAC size). Used in RX only. */
-    DWT_STS_MODE_OFF, 		/* STS disabled */
+    DWT_STS_MODE_1 | DWT_STS_MODE_SDC, 		/* STS disabled */
     DWT_STS_LEN_64,   		/* STS length see allowed values in Enum dwt_sts_lengths_e */
     DWT_PDOA_M0       		/* PDOA mode off */
 };
@@ -638,7 +638,7 @@ void loop_initiator() {
     digitalWrite(LED_D9, true); //LED off
 
     //need this to give time for the responder to finish up; 0 delay results in com issues
-    delay(50);
+    delay(15);
 
 
 

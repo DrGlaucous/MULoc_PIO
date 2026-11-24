@@ -15,6 +15,8 @@
 //we need to calibrate the board in order to get these
 #define RX_ANT_DELAY 16375
 #define TX_ANT_DELAY 16375
+//#define RX_ANT_DELAY 16416
+//#define TX_ANT_DELAY 16416
 
 //time after sending a packet before enabling RX mode
 #define RX_AFTER_TX_DELAY 450
